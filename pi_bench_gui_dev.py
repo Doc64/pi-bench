@@ -292,16 +292,18 @@ class RunHistory:
         slug = "".join(c for c in slug if c.isalnum() or c in "_-")
         run_id = f"{slug}_{ts}"
         data = {
-            "run_id":       run_id,
-            "timestamp":    datetime.datetime.now().isoformat(),
-            "cpu":          report.get("cpu", ""),
-            "results":      report.get("results", {}),
-            "summary":      report.get("summary"),
-            "summary_text": report.get("summary_text", ""),
-            "cooling":      report.get("cooling"),
-            "cooling_text": report.get("cooling_text"),
-            "fan_text":     report.get("fan_text"),
-            "full_report":  report.get("full_report", ""),
+            "run_id":         run_id,
+            "timestamp":      datetime.datetime.now().isoformat(),
+            "cpu":            report.get("cpu", ""),
+            "results":        report.get("results", {}),
+            "summary":        report.get("summary"),
+            "summary_text":   report.get("summary_text", ""),
+            "cooling":        report.get("cooling"),
+            "cooling_text":   report.get("cooling_text"),
+            "fan_text":       report.get("fan_text"),
+            "full_report":    report.get("full_report", ""),
+            "cooldown_stats": report.get("cooldown_stats") or {},
+            "ambient_c":      report.get("ambient_c", 22),
         }
         path = os.path.join(self.runs_dir, f"{run_id}.json")
         with open(path, "w", encoding="utf-8") as f:
@@ -445,6 +447,8 @@ def _extract_metrics(run_data: dict) -> dict:
     agg     = summary.get("aggregate") or {}
     single  = results.get("single") or {}
     multi   = results.get("multi")  or {}
+    cd      = run_data.get("cooldown_stats") or {}
+    amb     = run_data.get("ambient_c")
 
     s_tput  = single.get("throughput_digits_per_sec", 0) or 0
     m_tput  = multi.get("aggregate_throughput_digits_per_sec", 0) or 0
@@ -452,21 +456,33 @@ def _extract_metrics(run_data: dict) -> dict:
     ideal   = s_tput * workers
     eff     = (m_tput / ideal * 100) if ideal > 0 else None
 
+    # Ambient-referenced thermal resistance: (steady_tmp - ambient) / steady_watt
+    # Complements the existing baseline-referenced Rth with an absolute metric.
+    rth_ambient = None
+    if (amb is not None and cooling.get("steady_tmp") and
+            cooling.get("steady_watt") and cooling["steady_watt"] > 5.0):
+        rth_ambient = (cooling["steady_tmp"] - amb) / cooling["steady_watt"]
+
     return {
-        "Single throughput":      (s_tput,                                        "d/s",    True),
-        "Multi throughput":       (m_tput,                                        "d/s",    True),
-        "Parallel efficiency":    (eff,                                            "%",      True),
-        "Avg CPU busy":           (agg.get("avg_busy_pct"),                        "%",      True),
-        "Avg clock":              (agg.get("avg_clock_mhz"),                       "MHz",    True),
-        "Peak clock":             (agg.get("peak_clock_mhz"),                      "MHz",    True),
-        "Steady temp":            (cooling.get("steady_tmp"),                      "°C",     False),
-        "Peak temp":              (cooling.get("peak_tmp"),                        "°C",     False),
-        "Steady power":           (cooling.get("steady_watt"),                     "W",      False),
-        "Peak power":             (agg.get("peak_pkg_watt"),                       "W",      False),
-        "Thermal resistance":     (cooling.get("thermal_resistance_c_per_w"),      "°C/W",   False),
-        "Throttle headroom":      (cooling.get("throttle_headroom_c"),             "°C",     True),
-        "F-state throttle":       (cooling.get("throttled_sample_count", 0),       "samples",False),
-        "T-state throttle":       (cooling.get("tstate_throttled_sample_count",0), "samples",False),
+        "Single throughput":        (s_tput,                                        "d/s",    True),
+        "Multi throughput":         (m_tput,                                        "d/s",    True),
+        "Parallel efficiency":      (eff,                                            "%",      True),
+        "Avg CPU busy":             (agg.get("avg_busy_pct"),                        "%",      True),
+        "Avg clock":                (agg.get("avg_clock_mhz"),                       "MHz",    True),
+        "Peak clock":               (agg.get("peak_clock_mhz"),                      "MHz",    True),
+        "Clock consistency (CV)":   (agg.get("clock_cv_pct"),                        "%CV",    False),
+        "Steady temp":              (cooling.get("steady_tmp"),                      "°C",     False),
+        "Peak temp":                (cooling.get("peak_tmp"),                        "°C",     False),
+        "Steady power":             (cooling.get("steady_watt"),                     "W",      False),
+        "Peak power":               (agg.get("peak_pkg_watt"),                       "W",      False),
+        "Thermal resistance":       (cooling.get("thermal_resistance_c_per_w"),      "°C/W",   False),
+        "Rth vs ambient":           (rth_ambient,                                    "°C/W",   False),
+        "Throttle headroom":        (cooling.get("throttle_headroom_c"),             "°C",     True),
+        "F-state throttle":         (cooling.get("throttled_sample_count", 0),       "samples",False),
+        "T-state throttle":         (cooling.get("tstate_throttled_sample_count",0), "samples",False),
+        "Cool-down duration":       (cd.get("duration_s"),                           "s",      False),
+        "Cool-down rate":           (cd.get("rate_c_per_min"),                       "°C/min", True),
+        "Cool-down drop":           (cd.get("drop_c"),                               "°C",     True),
     }
 
 
@@ -563,6 +579,8 @@ class BenchmarkThread(QThread):
         old_stdout = pb.sys.stdout
         pb.sys.stdout = _Tee()
         results = {}
+        cooldown_samples       = []
+        _bench_end_sample_count = 0   # samples collected before cool-down starts
 
         try:
             if args.mode in ("single", "both"):
@@ -577,36 +595,61 @@ class BenchmarkThread(QThread):
                     args.digits, args.workers, quiet=False,
                     raw_turbo_path=raw_turbo, fans=fans, fan_samples=fan_samples,
                     lhm_sampler=lhm_sampler, progress_callback=on_progress)
+
+            # ── Cool-down phase ──────────────────────────────────────────
+            # Measure how fast the CPU returns to idle temps — a direct
+            # indicator of cooler effectiveness.  Runs only when the
+            # benchmark completed without error and LHM is active.
+            _active_sampler = archive_state.get("lhm_sampler") or own_lhm
+            if _active_sampler is not None:
+                _bench_end_sample_count = len(_active_sampler.all_samples())
+                _pre = pb.analyze_cooling_lhm(_active_sampler.all_samples())
+                _idle_tmp = (_pre.get("baseline_tmp") if _pre else None) or 35.0
+                self.phase_changed.emit("cooldown")
+                self.log_line.emit("[cooldown] measuring cool-down (up to 90 s)…")
+                cooldown_samples = pb.measure_cooldown(
+                    _active_sampler, _idle_tmp, on_progress, max_duration=90)
+                self.log_line.emit(
+                    f"[cooldown] done — {len(cooldown_samples)} samples, "
+                    f"dropped {pb.summarize_cooldown(cooldown_samples).get('drop_c', 0):.1f} °C")
+
         finally:
             pb.sys.stdout = old_stdout
             pb.sys.stdin  = old_stdin
 
             bench_text = captured.getvalue()
             report = {
-                "results":      results,
-                "bench_output": bench_text,
-                "lhm_samples":  [],
-                "summary":      None,
-                "summary_text": "(no sensor data)",
-                "cooling":      None,
-                "cooling_text": None,
-                "fan_text":     None,
-                "full_report":  None,
-                "cpu":          pb.detect_cpu_name(),
+                "results":          results,
+                "bench_output":     bench_text,
+                "lhm_samples":      [],
+                "summary":          None,
+                "summary_text":     "(no sensor data)",
+                "cooling":          None,
+                "cooling_text":     None,
+                "fan_text":         None,
+                "full_report":      None,
+                "cpu":              pb.detect_cpu_name(),
+                "cooldown_samples": cooldown_samples,
+                "cooldown_stats":   pb.summarize_cooldown(cooldown_samples),
+                "ambient_c":        cfg.get("ambient_c", 22),
             }
 
             active = archive_state.get("lhm_sampler") or own_lhm
             if active is not None:
-                samples = active.all_samples()
-                report["lhm_samples"] = samples
-                if samples:
-                    summary = pb.summarize_lhm_samples(samples)
+                all_samps = active.all_samples()
+                # Use only pre-cooldown samples for thermal analysis so the
+                # cooldown's low-load readings don't distort baseline temps.
+                bench_samps = (all_samps[:_bench_end_sample_count]
+                               if _bench_end_sample_count > 0 else all_samps)
+                report["lhm_samples"] = bench_samps
+                if bench_samps:
+                    summary = pb.summarize_lhm_samples(bench_samps)
                     report["summary"]      = summary
                     report["summary_text"] = pb.format_turbostat_summary(summary)
-                    cooling = pb.analyze_cooling_lhm(samples)
+                    cooling = pb.analyze_cooling_lhm(bench_samps)
                     report["cooling"]      = cooling
                     report["cooling_text"] = pb.format_cooling_analysis(cooling)
-                    fd = pb.analyze_fans_lhm(samples)
+                    fd = pb.analyze_fans_lhm(bench_samps)
                     report["fan_text"]     = pb.format_fan_analysis(fd) if fd else None
 
             try:
@@ -747,7 +790,9 @@ class DualLiveChart(QWidget):
         lay.addWidget(self._tabs, 1)
 
         self._charts: dict[str, LiveChart] = {}
-        for phase, label in (("single", "Single Thread"), ("multi", "Multi Thread")):
+        for phase, label in (("single", "Single Thread"),
+                              ("multi",   "Multi Thread"),
+                              ("cooldown","Cool-down")):
             c = LiveChart()
             self._charts[phase] = c
             self._tabs.addTab(c, label)
@@ -785,7 +830,8 @@ class DualLiveChart(QWidget):
 
     def set_active(self, phase: str) -> None:
         self._active_phase = phase
-        self._tabs.setCurrentIndex(0 if phase == "single" else 1)
+        idx = {"single": 0, "multi": 1, "cooldown": 2}.get(phase, 0)
+        self._tabs.setCurrentIndex(idx)
         self._charts[phase].reset()
 
     def set_core_labels(self, clock_names: list, temp_names: list) -> None:
@@ -1100,6 +1146,142 @@ class CompareTab(QWidget):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+#  HISTORY TAB
+# ═══════════════════════════════════════════════════════════════════════════
+
+class _NumItem(QTableWidgetItem):
+    """QTableWidgetItem that sorts numerically (not lexicographically)."""
+    def __init__(self, display: str, sort_val):
+        super().__init__(display)
+        self._sv = sort_val if sort_val is not None else -1e18
+        self.setTextAlignment(Qt.AlignmentFlag.AlignVCenter |
+                              Qt.AlignmentFlag.AlignRight)
+    def __lt__(self, other):
+        try:    return self._sv < other._sv
+        except: return super().__lt__(other)
+
+
+class HistoryTab(QWidget):
+    """Sortable table of every saved benchmark run.
+    Double-click a row to load that run in the Reports tab."""
+
+    run_selected = pyqtSignal(dict)
+
+    _COLS = [
+        ("Date",           130),
+        ("CPU",            185),
+        ("Single (d/s)",   100),
+        ("Multi (d/s)",    100),
+        ("Peak °C",         70),
+        ("Avg W",           60),
+        ("Rth °C/W",        70),
+        ("Clock CV %",      75),
+        ("Cooldown (s)",    80),
+    ]
+
+    def __init__(self, history: RunHistory):
+        super().__init__()
+        self._history = history
+        self._runs: list[dict] = []
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(8)
+
+        btn_row = QHBoxLayout()
+        refresh_btn = QPushButton("↺  Refresh")
+        refresh_btn.setFixedWidth(100)
+        refresh_btn.setStyleSheet(
+            f"QPushButton{{background:{PANEL_BG};color:{TEXT};"
+            f"border:1px solid {SUBTLE};border-radius:3px;padding:4px 8px;}}"
+            f"QPushButton:hover{{border-color:{ACCENT};}}")
+        refresh_btn.clicked.connect(self.refresh)
+        lbl = QLabel("Double-click a row to view that run's full report")
+        lbl.setStyleSheet(f"color:{SUBTLE};font-size:8pt;")
+        btn_row.addWidget(refresh_btn)
+        btn_row.addWidget(lbl)
+        btn_row.addStretch()
+        root.addLayout(btn_row)
+
+        self._table = QTableWidget()
+        self._table.setColumnCount(len(self._COLS))
+        self._table.setHorizontalHeaderLabels([c for c, _ in self._COLS])
+        self._table.horizontalHeader().setStretchLastSection(True)
+        self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._table.setAlternatingRowColors(True)
+        self._table.setSortingEnabled(True)
+        self._table.setStyleSheet(
+            f"QTableWidget{{background:{PANEL_BG};color:{TEXT};"
+            f"gridline-color:{SUBTLE};border:none;}}"
+            f"QHeaderView::section{{background:{DARK_BG};color:{ACCENT};"
+            f"padding:6px;border:none;}}"
+            f"QTableWidget::item{{padding:4px;}}"
+            f"QTableWidget::item:alternate{{background:{DARK_BG};}}")
+        for i, (_, w) in enumerate(self._COLS):
+            self._table.setColumnWidth(i, w)
+        self._table.doubleClicked.connect(self._on_double_click)
+        root.addWidget(self._table, 1)
+        self.refresh()
+
+    # ------------------------------------------------------------------
+    def refresh(self):
+        self._runs = self._history.load_all()
+        self._table.setSortingEnabled(False)
+        self._table.setRowCount(0)
+
+        for r in self._runs:
+            results = r.get("results") or {}
+            cooling = r.get("cooling") or {}
+            summary = r.get("summary") or {}
+            agg     = summary.get("aggregate") or {}
+            single  = results.get("single") or {}
+            multi   = results.get("multi")  or {}
+            cd      = r.get("cooldown_stats") or {}
+
+            ts   = (r.get("timestamp", "")[:16]).replace("T", " ")
+            cpu  = r.get("cpu", "")
+            s_t  = single.get("throughput_digits_per_sec")    or 0
+            m_t  = multi.get("aggregate_throughput_digits_per_sec") or 0
+            p_c  = cooling.get("peak_tmp")
+            a_w  = agg.get("avg_pkg_watt")
+            rth  = cooling.get("thermal_resistance_c_per_w")
+            cv   = agg.get("clock_cv_pct")
+            cds  = cd.get("duration_s")
+
+            row = self._table.rowCount()
+            self._table.insertRow(row)
+
+            # Text columns (col 0: date, col 1: cpu)
+            ts_item = QTableWidgetItem(ts)
+            ts_item.setData(Qt.ItemDataRole.UserRole + 1, r)   # stash run dict
+            self._table.setItem(row, 0, ts_item)
+            self._table.setItem(row, 1, QTableWidgetItem(cpu))
+
+            # Numeric columns
+            def _ni(v, fmt):
+                s = fmt.format(v) if v is not None else "—"
+                return _NumItem(s, float(v) if v is not None else None)
+
+            self._table.setItem(row, 2, _ni(s_t,  "{:,.0f}"))
+            self._table.setItem(row, 3, _ni(m_t,  "{:,.0f}"))
+            self._table.setItem(row, 4, _ni(p_c,  "{:.1f}"))
+            self._table.setItem(row, 5, _ni(a_w,  "{:.1f}"))
+            self._table.setItem(row, 6, _ni(rth,  "{:.3f}"))
+            self._table.setItem(row, 7, _ni(cv,   "{:.1f}"))
+            self._table.setItem(row, 8, _ni(cds,  "{:.0f}"))
+
+        self._table.setSortingEnabled(True)
+
+    def _on_double_click(self, index):
+        item = self._table.item(index.row(), 0)
+        if item:
+            r = item.data(Qt.ItemDataRole.UserRole + 1)
+            if r:
+                self.run_selected.emit(r)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 #  SETTINGS PANEL
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -1122,6 +1304,11 @@ class SettingsPanel(QWidget):
         bl.addWidget(QLabel("Mode:"))
         self.mode = QComboBox(); self.mode.addItems(["both","multi","single"])
         bl.addWidget(self.mode)
+        bl.addWidget(QLabel("Room temp (°C):"))
+        self.ambient_c = QSpinBox()
+        self.ambient_c.setRange(10, 45); self.ambient_c.setValue(22)
+        self.ambient_c.setToolTip("Ambient room temperature — used for ambient-referenced\nthermal resistance and cool-down analysis")
+        bl.addWidget(self.ambient_c)
         root.addWidget(bench)
 
         nas = QGroupBox("Archive to NAS")
@@ -1198,6 +1385,7 @@ class SettingsPanel(QWidget):
             "sftp_password": pw,
             "smb_share":     f"//{nas}/Common-Room",
             "sftp_user":     user,
+            "ambient_c":     self.ambient_c.value(),
         }
 
 
@@ -1286,6 +1474,11 @@ class MainWindow(QMainWindow):
         self._compare_tab = CompareTab(self._history)
         self._tabs.addTab(self._compare_tab, "Compare")
 
+        # Tab 4 — History
+        self._history_tab = HistoryTab(self._history)
+        self._history_tab.run_selected.connect(self._on_history_run_selected)
+        self._tabs.addTab(self._history_tab, "History")
+
         root.addWidget(left_w)
         root.addWidget(self._tabs, 1)
 
@@ -1343,9 +1536,19 @@ class MainWindow(QMainWindow):
         # Refresh history tabs
         self._reports_tab.show_run(report)
         self._compare_tab.refresh()
+        self._history_tab.refresh()
 
         # Switch to Results tab after a beat
         QTimer.singleShot(400, lambda: self._tabs.setCurrentIndex(1))
+
+    def _on_history_run_selected(self, run_data: dict):
+        """Load a historical run into the Reports tab and switch to it."""
+        self._reports_tab.show_run(run_data)
+        # Find and switch to Reports tab (index 2)
+        for i in range(self._tabs.count()):
+            if self._tabs.tabText(i) == "Reports":
+                self._tabs.setCurrentIndex(i)
+                break
 
     def _on_finished(self, results: dict):
         self.run_btn.setEnabled(True)

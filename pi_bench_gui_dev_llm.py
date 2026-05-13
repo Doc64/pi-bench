@@ -31,7 +31,7 @@ from pi_bench_gui_dev import (
     RUNS_DIR,
     _apply_dark_palette, _build_summary_text, _generate_recommendations,
     RunHistory, BenchmarkThread,
-    LiveChart, StatBar, ResultsView, ReportsTab, CompareTab,
+    LiveChart, StatBar, ResultsView, ReportsTab, CompareTab, HistoryTab,
     SettingsPanel,
     StartupChecker, SplashScreen as _BaseSplash,
     main as _base_main,
@@ -254,16 +254,32 @@ def _build_llm_prompt(report: dict) -> tuple[str, str]:
     slowest_core    = min(core_avg_clocks) if core_avg_clocks else 0.0
     core_spread     = fastest_core - slowest_core  # large spread = heterogeneous boost
 
-    steady_c = float(cooling.get("steady_tmp") or 0)
-    peak_c   = float(cooling.get("peak_tmp") or 0)
-    steady_w = float(cooling.get("steady_watt") or 0)
-    avg_w    = float(agg.get("avg_pkg_watt") or 0)
-    rth      = cooling.get("thermal_resistance_c_per_w")
-    f_thr    = int(cooling.get("throttled_sample_count") or 0)
-    t_thr    = int(cooling.get("tstate_throttled_sample_count") or 0)
-    hdroom   = float(cooling.get("throttle_headroom_c") or 0)
-    ramp     = cooling.get("ramp_rate_c_per_s")
-    tts      = cooling.get("time_to_steady_s")
+    steady_c  = float(cooling.get("steady_tmp") or 0)
+    peak_c    = float(cooling.get("peak_tmp") or 0)
+    steady_w  = float(cooling.get("steady_watt") or 0)
+    avg_w     = float(agg.get("avg_pkg_watt") or 0)
+    rth       = cooling.get("thermal_resistance_c_per_w")
+    f_thr     = int(cooling.get("throttled_sample_count") or 0)
+    t_thr     = int(cooling.get("tstate_throttled_sample_count") or 0)
+    hdroom    = float(cooling.get("throttle_headroom_c") or 0)
+    ramp      = cooling.get("ramp_rate_c_per_s")
+    tts       = cooling.get("time_to_steady_s")
+    clock_cv  = float(agg.get("clock_cv_pct") or 0)
+    clock_std = float(agg.get("clock_stddev_mhz") or 0)
+
+    # Cool-down metrics
+    cd        = report.get("cooldown_stats") or {}
+    cd_dur    = cd.get("duration_s")
+    cd_drop   = cd.get("drop_c")
+    cd_rate   = cd.get("rate_c_per_min")
+    cd_start  = cd.get("start_tmp_c")
+    cd_end    = cd.get("end_tmp_c")
+
+    # Ambient-referenced thermal resistance
+    ambient_c    = float(report.get("ambient_c") or 22)
+    rth_ambient  = None
+    if steady_c > 0 and steady_w > 5.0:
+        rth_ambient = (steady_c - ambient_c) / steady_w
 
     # Power efficiency — digits computed per joule of energy spent
     s_perf_per_watt = (s_tput / avg_w)  if avg_w > 0 and s_tput > 0 else 0.0
@@ -304,6 +320,8 @@ def _build_llm_prompt(report: dict) -> tuple[str, str]:
         f"  Peak clock (burst)       : {pk_mhz:.0f} MHz",
         f"  Boost sustainability     : {boost_sustain:.1f}%  (avg/peak — 100% = held boost perfectly)",
         f"  Clock droop              : {clock_droop:.0f} MHz  (peak minus avg; >200 MHz = notable fade)",
+        f"  Clock consistency (CV)   : {clock_cv:.1f}%  (std dev / mean × 100; <5% = stable, >15% = erratic)",
+        f"  Clock std dev            : {clock_std:.0f} MHz",
     ]
     if fastest_core > 0:
         data_lines += [
@@ -327,29 +345,40 @@ def _build_llm_prompt(report: dict) -> tuple[str, str]:
     data_lines += [
         f"",
         f"THERMALS:",
+        f"  Ambient room temp        : {ambient_c:.0f}°C  (user-entered)",
         f"  Avg CPU busy             : {avg_busy:.1f}%",
         f"  Steady / peak temp       : {steady_c:.1f}°C / {peak_c:.1f}°C",
         f"  Throttle headroom        : ~{hdroom:.0f}°C below TjMax (100°C)",
+        f"  F-state throttling       : {'YES — ' + str(f_thr) + ' samples' if f_thr else 'none'}",
+        f"  T-state throttling       : {'YES — ' + str(t_thr) + ' samples' if t_thr else 'none'}",
     ]
     if rth is not None:
-        data_lines.append(f"  Thermal resistance       : {float(rth):.3f} °C/W")
+        data_lines.append(f"  Thermal resistance (Δ)   : {float(rth):.3f} °C/W  (CPU baseline-referenced)")
+    if rth_ambient is not None:
+        data_lines.append(f"  Thermal resistance (amb) : {rth_ambient:.3f} °C/W  (ambient-referenced; lower = better cooler)")
     if ramp is not None:
         data_lines.append(f"  Thermal ramp rate        : {float(ramp):.1f} °C/s (first 10s of load)")
     if tts is not None:
         data_lines.append(f"  Time to thermal steady   : ~{int(tts)}s after load start")
-    data_lines += [
-        f"  F-state throttling       : {'YES — ' + str(f_thr) + ' samples' if f_thr else 'none'}",
-        f"  T-state throttling       : {'YES — ' + str(t_thr) + ' samples' if t_thr else 'none'}",
-    ]
+    if cd_dur is not None:
+        data_lines += [
+            f"",
+            f"COOL-DOWN (after benchmark ended):",
+            f"  Start temp               : {cd_start:.1f}°C",
+            f"  End temp                 : {cd_end:.1f}°C",
+            f"  Total drop               : {cd_drop:.1f}°C in {cd_dur:.0f}s",
+            f"  Avg cooling rate         : {cd_rate:.1f} °C/min  (higher = more effective cooler)",
+        ]
 
     # ── Return (system_text, user_text) for gpt4all chat_session ─────────
     user_text = (
         "Here is my Pi Bench run data. Analyse every metric provided and give "
         "a concise technical report with one paragraph per section:\n"
         "1. Overall performance verdict (throughput, scaling, parallel efficiency)\n"
-        "2. Clock speed behaviour (boost sustainability, droop, core-to-core spread)\n"
+        "2. Clock speed behaviour (boost sustainability, droop, consistency CV, core spread)\n"
         "3. Power consumption and efficiency (perf/watt, burst behaviour, draw levels)\n"
-        "4. Thermal and cooling assessment (temps, throttling, headroom, ramp rate)\n"
+        "4. Thermal and cooling assessment (temps, throttling, headroom, ramp rate, "
+        "thermal resistance, cool-down rate)\n"
         "5. Specific actionable recommendations based on all of the above\n\n"
         "Do not skip any section. If a metric is missing or zero, note it briefly "
         "and move on — do not pad with generic advice.\n\n"
@@ -481,7 +510,7 @@ class LlmSplashScreen(_SplashBase):
     def __init__(self):
         # Don't call super().__init__() — rebuild ourselves with LlmStartupChecker
         QWidget.__init__(self)
-        self.setWindowTitle("Pi Benchmark")
+        self.setWindowTitle("Pi Bench")
         self.setFixedSize(460, 440)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setStyleSheet(f"background:{DARK_BG};border:1px solid {SUBTLE};")

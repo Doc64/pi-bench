@@ -1373,7 +1373,103 @@ def summarize_lhm_samples(samples, load_threshold=50.0):
             "peak_tmp": max(temps) if temps else 0.0,
         }
     summary["per_core_peaks"] = per_core_peaks
+
+    # ── Clock consistency across all per-core samples during load ──────────
+    # Coefficient of variation (std dev / mean × 100) tells you how much the
+    # clocks bounced around.  Low CV = held boost steadily.  High CV = a lot
+    # of boost-to-idle cycling (thermal or power limit throttling).
+    all_clock_readings = []
+    for s in load:
+        for c in (s.get("core_clocks") or []):
+            if c is not None and c > 0:
+                all_clock_readings.append(float(c))
+    # Fallback to per-sample max when no per-core data available
+    if not all_clock_readings:
+        all_clock_readings = [_sample_max_mhz(s) for s in load
+                              if _sample_max_mhz(s) > 0]
+    if len(all_clock_readings) >= 2:
+        import statistics as _stats
+        _c_mean = _stats.mean(all_clock_readings)
+        _c_std  = _stats.stdev(all_clock_readings)
+        summary["aggregate"]["clock_stddev_mhz"] = round(_c_std, 1)
+        summary["aggregate"]["clock_cv_pct"]     = round(
+            (_c_std / _c_mean * 100.0) if _c_mean > 0 else 0.0, 2)
+    else:
+        summary["aggregate"]["clock_stddev_mhz"] = 0.0
+        summary["aggregate"]["clock_cv_pct"]     = 0.0
+
     return summary
+
+
+def measure_cooldown(lhm_sampler, target_tmp, progress_callback=None,
+                     max_duration=90):
+    """Sample LHM after a benchmark ends until the CPU temp falls within 5 °C
+    of *target_tmp* (the idle baseline), or *max_duration* seconds elapses.
+
+    Calls *progress_callback* with the same extended signature used by
+    HeartbeatReporter so the GUI chart can plot the cool-down live.
+
+    Returns a list of LHM sample dicts (~1 per second).
+    """
+    cooldown_samples = []
+    t0 = time.time()
+    while True:
+        elapsed = time.time() - t0
+        if elapsed > max_duration:
+            break
+        s = lhm_sampler.latest_sample()
+        if s is not None:
+            cooldown_samples.append(dict(s))
+            cur_tmp = float(s.get("pkg_tmp") or 0.0)
+            # Stop once we've cooled within 5 °C of idle (after a minimum 5 s)
+            if cur_tmp <= (target_tmp + 5.0) and elapsed >= 5.0:
+                break
+            if progress_callback is not None:
+                try:
+                    clocks = s.get("core_clocks") or []
+                    mhz    = max(clocks) if clocks else 0.0
+                    progress_callback(
+                        elapsed, 0, 0,
+                        float(s.get("cpu_busy") or 0.0),
+                        mhz,
+                        cur_tmp,
+                        float(s.get("pkg_watt") or 0.0),
+                        clocks,
+                        s.get("core_temps")       or [],
+                        s.get("core_clock_names") or [],
+                        s.get("core_temp_names")  or [],
+                    )
+                except Exception:
+                    pass
+        time.sleep(1.0)
+    return cooldown_samples
+
+
+def summarize_cooldown(cooldown_samples):
+    """Summarise a cool-down sample list returned by measure_cooldown().
+
+    Returns a dict with:
+      duration_s      — how long the cool-down phase lasted
+      start_tmp_c     — temperature at cool-down start (= end of benchmark)
+      end_tmp_c       — temperature when cool-down ended
+      drop_c          — total degrees dropped
+      rate_c_per_min  — average cooling rate (higher = faster cooler)
+    """
+    if not cooldown_samples or len(cooldown_samples) < 2:
+        return {}
+    temps      = [float(s.get("pkg_tmp") or 0.0) for s in cooldown_samples]
+    duration_s = len(cooldown_samples)      # LHMSampler runs at ~1 Hz
+    start_tmp  = temps[0]
+    end_tmp    = temps[-1]
+    drop_c     = start_tmp - end_tmp
+    rate_c_per_min = (drop_c / duration_s * 60.0) if duration_s > 0 else 0.0
+    return {
+        "duration_s":     duration_s,
+        "start_tmp_c":    round(start_tmp, 1),
+        "end_tmp_c":      round(end_tmp, 1),
+        "drop_c":         round(drop_c, 1),
+        "rate_c_per_min": round(rate_c_per_min, 1),
+    }
 
 
 def format_turbostat_summary(summary):
