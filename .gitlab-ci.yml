@@ -1,0 +1,11 @@
+build-installer:
+  tags:
+    - windows
+  script:
+    - '& "C:\Users\tom\AppData\Local\Programs\Inno Setup 7\ISCC.exe" pi_bench_setup.iss'
+  artifacts:
+    paths:
+      - dist/PiBenchSetup.exe
+    expire_in: 30 days
+  only:
+    - main
