@@ -1,93 +1,158 @@
-# pi-bench
+# Pi Bench
 
+A CPU compute benchmark that measures single-thread and multi-thread performance by computing Pi to a configurable number of digits, while simultaneously capturing live sensor data via LibreHardwareMonitor on Windows and turbostat on Linux.
 
+Designed for three use cases:
+- **CPU performance comparison** — compare throughput across different machines or configurations
+- **CPU health validation** — verify computation correctness with SHA-256 cross-checks and detect thermal/power throttling
+- **Cooler efficiency comparison** — thermal resistance (°C/W), cool-down rate, and throttle detection give an objective picture of how well a cooler handles sustained load
 
-## Getting started
+---
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## Features
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+### Benchmark Engine
+- Pi computed via the Chudnovsky algorithm (arbitrary precision, `mpmath`)
+- Single-thread and multi-thread modes (configurable worker count)
+- SHA-256 hash of output for correctness verification
+- Cross-worker consistency check in multi mode
 
-## Add your files
+### Live Sensor Data (Windows via LibreHardwareMonitor, Linux via turbostat)
+- Per-core clock speeds and temperatures charted in real time
+- Package power and CPU load
+- Fan RPM for all detected fans
+- Supports Intel and AMD CPUs (Ryzen, including 3D V-Cache variants)
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+### Live Charts
+- **Single Thread** and **Multi Thread** tabs — separate charts per phase so they don't overwrite each other
+- **Cool-down** tab — automatically starts after the benchmark ends, plots temp/power/clock decay back to idle
+- Per-core colour-coded lines using a golden-ratio hue sequence (scales cleanly from 1 to 128+ cores)
+- Shared legend strip showing LHM sensor names for each core
+
+### Analysis
+- Thermal resistance (°C/W) — both CPU-baseline-referenced and ambient-referenced
+- Clock consistency (coefficient of variation) — low CV = held boost steadily, high CV = throttle cycling
+- Cool-down rate (°C/min) — direct cooler efficiency metric
+- F-state and T-state throttle detection
+- Throttle headroom below TjMax
+- Fan analysis (min/avg/peak RPM for every detected fan)
+- Automated recommendations (throttling, thermal resistance, temp headroom)
+
+### AI Analysis Tab
+- On-device LLM analysis using Phi-3.5 Mini Instruct (Q4_K_M, ~2.2 GB) via gpt4all
+- Evaluates all metrics: performance, clock behaviour, power, thermals, cool-down
+- Runs 100% locally — no data sent to any server
+- Model downloads automatically on first launch of the AI tab
+
+### History & Comparison
+- Every run saved as JSON in `pi_bench_runs/`
+- **History tab** — sortable table of all past runs (date, CPU, throughput, peak temp, Rth, clock CV, cool-down)
+- **Compare tab** — side-by-side metric diff between any two saved runs with delta colouring
+- **Reports tab** — full text report for any saved run
+- Results archived to NAS via SFTP after each run (optional, configurable)
+
+---
+
+## Installation (End Users)
+
+Download `PiBenchSetup.exe` from the [latest pipeline artifacts](../../-/pipelines) and run it.
+
+The installer:
+1. Downloads Python 3.12.8 embeddable runtime (~26 MB)
+2. Installs PyQt6, gpt4all, and dependencies (~200 MB)
+3. Creates Start Menu and optional Desktop shortcuts
+4. Installs to `%LOCALAPPDATA%\Programs\Pi Bench\` — no admin required
+
+The LLM model (~2.2 GB) downloads automatically the first time the AI Analysis tab is opened.
+
+**Requirements:** Windows 10/11 x64. LibreHardwareMonitor must be running with its web server enabled (the app will prompt you on first launch if it isn't).
+
+---
+
+## Building the Installer
+
+The GitLab CI/CD pipeline builds `PiBenchSetup.exe` automatically on every push to `main`.
+
+To build manually on the workbench:
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.lumiforge.cc/doc/pi-bench.git
-git branch -M main
-git push -uf origin main
+build_installer.bat
 ```
 
-## Integrate with your tools
+Or with Inno Setup directly:
 
-* [Set up project integrations](https://gitlab.lumiforge.cc/doc/pi-bench/-/settings/integrations)
+```
+"C:\Users\tom\AppData\Local\Programs\Inno Setup 7\ISCC.exe" pi_bench_setup.iss
+```
 
-## Collaborate with your team
+Output: `dist\PiBenchSetup.exe`
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+**Build requirements:** [Inno Setup 7](https://jrsoftware.org/isdl.php) installed on the build machine.
 
-## Test and Deploy
+---
 
-Use the built-in continuous integration in GitLab.
+## Running from Source
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+```bash
+# Install dependencies
+pip install PyQt6 pyqtgraph mpmath gpt4all
 
-***
+# Dev build (no LLM)
+python pi_bench_gui_dev.py
 
-# Editing this README
+# Dev build + AI analysis
+python pi_bench_gui_dev_llm.py
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+# Command line only
+python pi_bench.py --digits 5 --mode both --workers 16
+```
 
-## Suggestions for a good README
+### Command Line Options
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--digits N` | 5 | Digits of Pi to compute, in millions |
+| `--mode` | both | `single`, `multi`, or `both` |
+| `--workers N` | logical CPU count | Worker processes for multi-thread run |
+| `--archive` | off | Upload report to NAS after run |
+| `--json` | off | Print JSON summary to stdout |
 
-## Name
-Choose a self-explaining name for your project.
+---
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+## File Structure
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+```
+pi_bench.py              Core benchmark engine, LHM integration, analysis functions
+pi_bench_gui_dev.py      GUI — dev build (no LLM)
+pi_bench_gui_dev_llm.py  GUI — dev build + AI analysis tab
+pi_bench_gui.py          GUI — production build (stable)
+pi_bench_setup.iss       Inno Setup 7 installer script
+_setup_python.bat        Bootstrap: downloads Python runtime during install
+install.py               Post-install: pip installs packages, sets up VC++ runtime
+uninstall.py             Removes runtime artifacts on uninstall
+.gitlab-ci.yml           CI/CD pipeline — builds installer on push to main
+pi_bench_runs/           Saved run JSON files (created at runtime)
+pi_bench_models/         LLM model storage (created at runtime)
+```
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+---
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+## Sensor Support
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+| Sensor | Intel | AMD |
+|--------|-------|-----|
+| Package power | `CPU Package` | `Package` |
+| Package temp | `CPU Package` | `Core (Tctl/Tdie)` |
+| Per-core clocks | `CPU Core #N` | `Core #N` |
+| Per-core temps | `CPU Core #N` | CCD temps (fallback) |
+| CPU load | `CPU Total` | `CPU Total` |
+| Fan speeds | all detected fans | all detected fans |
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+---
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+## Notes
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+- The 5800X3D and other 3D V-Cache CPUs hard-limit to 90°C to protect the cache stack — sustained 90°C under full load is normal behaviour, not a cooling failure
+- Thermal resistance is most accurate when the CPU starts from a true idle state before the benchmark
+- The cool-down phase runs automatically after the benchmark and stops when the CPU returns within 5°C of the pre-run idle temperature (max 90 seconds)
+- Clock CV < 5% = boost held steadily; 5–15% = moderate variation; > 15% = significant throttle cycling
