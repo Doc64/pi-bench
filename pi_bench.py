@@ -1490,6 +1490,12 @@ def format_turbostat_summary(summary):
         agg["avg_busy_pct"], agg["peak_busy_pct"]))
     out.append("  Clock:            {:>5.0f} MHz avg   (peak {:>5.0f} MHz)".format(
         agg["avg_clock_mhz"], agg["peak_clock_mhz"]))
+    cv  = agg.get("clock_cv_pct")
+    std = agg.get("clock_stddev_mhz")
+    if cv is not None:
+        stability = "stable" if cv < 5 else ("moderate" if cv < 15 else "erratic")
+        out.append("  Clock consistency:{:>6.1f}% CV   ({:.0f} MHz std dev — {})".format(
+            cv, std or 0.0, stability))
     out.append("  Package temp:     {:5.1f} C avg     (peak {:5.1f} C)".format(
         agg["avg_pkg_tmp_c"], agg["peak_pkg_tmp_c"]))
     out.append("  Package power:    {:5.2f} W avg     (peak {:5.2f} W)".format(
@@ -2299,8 +2305,26 @@ def archive_setup(args):
     return state
 
 
+def format_cooldown_section(cooldown_stats, ambient_c=None):
+    """Format cool-down summary for inclusion in the text report."""
+    if not cooldown_stats or not cooldown_stats.get("duration_s"):
+        return None
+    cd = cooldown_stats
+    lines = [
+        "Cool-down duration:   {:.0f}s  ({:.1f}°C → {:.1f}°C)".format(
+            cd["duration_s"], cd["start_tmp_c"], cd["end_tmp_c"]),
+        "Total temp drop:      {:.1f}°C".format(cd["drop_c"]),
+        "Avg cooling rate:     {:.1f} °C/min  (higher = more effective cooler)".format(
+            cd["rate_c_per_min"]),
+    ]
+    if ambient_c is not None:
+        lines.append("Room temperature:     {:.0f}°C  (user-entered)".format(ambient_c))
+    return "\n".join(lines)
+
+
 def build_combined_report(cpu_name, run_n, args, bench_output, turbo_summary_text,
-                          cooling_text=None, fan_text=None, sensor_source="turbostat"):
+                          cooling_text=None, fan_text=None, sensor_source="turbostat",
+                          cooldown_stats=None, ambient_c=None):
     sep = "=" * 64
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     info = system_info()
@@ -2342,6 +2366,15 @@ def build_combined_report(cpu_name, run_n, args, bench_output, turbo_summary_tex
             " Fan / Active-cooling analysis",
             sep,
             fan_text,
+            "",
+        ])
+    cd_text = format_cooldown_section(cooldown_stats, ambient_c)
+    if cd_text is not None:
+        parts.extend([
+            sep,
+            " Cool-down analysis",
+            sep,
+            cd_text,
             "",
         ])
     return "\n".join(parts)

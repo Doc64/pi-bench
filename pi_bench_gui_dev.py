@@ -659,7 +659,9 @@ class BenchmarkThread(QThread):
                     report["summary_text"],
                     cooling_text=report["cooling_text"],
                     fan_text=report["fan_text"],
-                    sensor_source="LibreHardwareMonitor" if active else "none")
+                    sensor_source="LibreHardwareMonitor" if active else "none",
+                    cooldown_stats=report.get("cooldown_stats"),
+                    ambient_c=report.get("ambient_c"))
             except Exception:
                 pass
 
