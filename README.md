@@ -150,6 +150,33 @@ pi_bench_models/         LLM model storage (created at runtime)
 
 ---
 
+## Privacy & Network Activity
+
+Pi Bench makes **no background connections** and has **no telemetry or analytics** of any kind.
+
+Network activity only happens in these specific, user-visible moments:
+
+| When | What | Where |
+|------|------|--------|
+| First run (Windows, archive mode) | Downloads LibreHardwareMonitor portable zip | `github.com/LibreHardwareMonitor` |
+| During install | Downloads Python 3.12.8 embeddable runtime | `python.org` |
+| During install | Installs Python packages via pip | `pypi.org` |
+| During install (if needed) | Downloads VC++ 2022 runtime | `aka.ms` (Microsoft) |
+| First AI tab launch | Downloads Phi-3.5 Mini model (~2.2 GB); SHA-256 verified before use | `huggingface.co/bartowski` |
+| Archive mode (optional, off by default) | Uploads benchmark report to your NAS | Your NAS (user-configured) |
+
+**Sensor data stays on your machine.** LibreHardwareMonitor's JSON endpoint is bound to `localhost` only — not reachable from other machines on your network.
+
+**Credentials are stored in the OS keyring** (Windows Credential Locker on Windows, Secret Service on Linux — both DPAPI-encrypted at rest). The app explicitly rejects plain-text fallback keyring backends. Credentials are removed from the keyring when you uninstall.
+
+**The AI analysis runs 100% locally.** The LLM model is loaded directly from disk; no data is sent to any server. The model cannot make network calls (`allow_download=False`).
+
+**NAS uploads use SSH/SFTP** with Trust-On-First-Use host key verification. The first upload to a NAS saves its SSH host key to `~/.ssh/known_hosts`; subsequent uploads verify against that key. A changed key (possible network tampering) aborts the upload with a clear error message.
+
+**Uninstalling removes everything the app created:** the embedded Python runtime, installed packages, downloaded LLM model, benchmark run history, managed LibreHardwareMonitor copy, and the keyring entry. Nothing is left behind.
+
+---
+
 ## Notes
 
 - The 5800X3D and other 3D V-Cache CPUs hard-limit to 90°C to protect the cache stack — sustained 90°C under full load is normal behaviour, not a cooling failure

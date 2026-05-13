@@ -14,7 +14,7 @@ Model choice: Phi-3.5 Mini Instruct Q4_K_M
   - CPU: ~8-15 tok/s (30-60 s for a full analysis)
 """
 
-import importlib, os, sys, threading, urllib.request
+import hashlib, importlib, json, os, sys, threading, urllib.request
 
 from PyQt6.QtCore    import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
@@ -46,6 +46,12 @@ MODEL_PATH   = os.path.join(MODELS_DIR, MODEL_FNAME)
 MODEL_URL    = (
     "https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF"
     "/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf"
+)
+# HuggingFace tree API — used to fetch the expected SHA-256 before downloading
+# so the model file is verified after transfer.
+MODEL_HF_API = (
+    "https://huggingface.co/api/models/bartowski/Phi-3.5-mini-instruct-GGUF"
+    "/tree/main"
 )
 MODEL_SIZE_MB = 2_390   # approximate, for progress display
 
@@ -102,27 +108,83 @@ class LlmStartupChecker(StartupChecker):
     def _check_model(self):
         if os.path.exists(MODEL_PATH):
             sz_mb = os.path.getsize(MODEL_PATH) / 1024 / 1024
-            self.check_update.emit("LLM model","ok",
-                                   f"found  ({sz_mb:.0f} MB)")
+            self.check_update.emit("LLM model", "ok", f"found  ({sz_mb:.0f} MB)")
             return
         os.makedirs(MODELS_DIR, exist_ok=True)
-        self.check_update.emit("LLM model","installing",
+
+        # Fetch expected SHA-256 from HuggingFace before downloading so we can
+        # verify the file is intact after transfer.
+        self.check_update.emit("LLM model", "installing", "fetching metadata…")
+        expected_sha256 = _fetch_model_sha256()   # None if API unreachable
+
+        self.check_update.emit("LLM model", "installing",
                                f"downloading {MODEL_SIZE_MB} MB…")
         try:
             _download_with_progress(
                 MODEL_URL, MODEL_PATH,
                 lambda done, total: self.check_update.emit(
-                    "LLM model","installing",
+                    "LLM model", "installing",
                     f"downloading… {done//1024//1024} / {total//1024//1024} MB"
                     if total else f"downloading… {done//1024//1024} MB"))
+
+            # Verify integrity if we have an expected hash
+            if expected_sha256:
+                self.check_update.emit("LLM model", "installing", "verifying…")
+                actual = _sha256_file(MODEL_PATH)
+                if actual != expected_sha256:
+                    # Bad download — remove the corrupted file
+                    try:
+                        os.unlink(MODEL_PATH)
+                    except Exception:
+                        pass
+                    self.check_update.emit(
+                        "LLM model", "warn",
+                        "download corrupt (SHA-256 mismatch) — file removed, retry")
+                    return
+
             sz_mb = os.path.getsize(MODEL_PATH) / 1024 / 1024
-            self.check_update.emit("LLM model","ok",f"downloaded  ({sz_mb:.0f} MB)")
+            self.check_update.emit("LLM model", "ok", f"downloaded  ({sz_mb:.0f} MB)")
         except Exception as exc:
-            self.check_update.emit("LLM model","warn", str(exc)[:80])
+            self.check_update.emit("LLM model", "warn", str(exc)[:80])
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  DOWNLOAD HELPER
+#  DOWNLOAD + INTEGRITY HELPERS
 # ═══════════════════════════════════════════════════════════════════════════
+
+def _fetch_model_sha256() -> "str | None":
+    """Ask HuggingFace's tree API for the expected SHA-256 of the model file.
+
+    HuggingFace stores GGUF files in Git LFS and publishes each file's
+    SHA-256 in the tree listing (entry["lfs"]["oid"] == "sha256:<hex>").
+    Fetching this before downloading lets us verify the file after transfer.
+
+    Returns the 64-char hex digest, or None if the API is unreachable or
+    the file isn't listed (in which case the download still proceeds but
+    integrity checking is skipped for that session).
+    """
+    try:
+        req = urllib.request.Request(
+            MODEL_HF_API, headers={"User-Agent": "pi-bench/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            tree = json.loads(resp.read())
+        for entry in tree:
+            if entry.get("path") == MODEL_FNAME:
+                oid = (entry.get("lfs") or {}).get("oid", "")
+                if oid.startswith("sha256:"):
+                    return oid[7:]   # 64-char hex
+    except Exception:
+        pass
+    return None
+
+
+def _sha256_file(path: str) -> str:
+    """Return the SHA-256 hex digest of path (reads in 1 MB chunks)."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
 
 def _download_with_progress(url: str, dest: str, progress_cb=None):
     tmp = dest + ".part"

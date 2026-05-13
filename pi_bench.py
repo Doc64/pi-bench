@@ -621,15 +621,19 @@ def lhm_launch(exe_path=None, elevated=True):
         return False
 
 
-# Pre-baked LHM config: enables web server, port 8085, all interfaces ("+")
-# in HTTP.sys notation. Written next to LibreHardwareMonitor.exe so LHM picks
-# it up on launch in portable mode.
+# Pre-baked LHM config: enables web server, port 8085, localhost only.
+# Written next to LibreHardwareMonitor.exe so LHM picks it up on launch.
+#
+# Security: "localhost" (HTTP.sys strong wildcard for loopback) restricts
+# the endpoint to this machine only.  "+" would bind to all interfaces and
+# let any host on the LAN read sensor data unauthenticated.  The app only
+# ever polls http://localhost:8085/data.json, so localhost is sufficient.
 LHM_CONFIG_XML = """<?xml version=\"1.0\" encoding=\"utf-8\"?>
 <configuration>
     <appSettings>
         <add key=\"runWebServerMenuItem\" value=\"true\" />
         <add key=\"listenerPort\" value=\"8085\" />
-        <add key=\"listenerIP\" value=\"+\" />
+        <add key=\"listenerIP\" value=\"localhost\" />
     </appSettings>
 </configuration>
 """
@@ -2115,18 +2119,59 @@ def _sftp_host_from_share(share):
     return s.split("/")[0]
 
 
+class _TOFUPolicy:
+    """Trust-On-First-Use SSH host key policy for paramiko.SSHClient.
+
+    Behaviour:
+      • Known host, key matches  → accepted silently (paramiko built-in check).
+      • Known host, key changed  → paramiko raises BadHostKeyException before
+                                   this policy is consulted.  Caller catches it
+                                   and aborts the upload with a clear message.
+      • New host (not in known_hosts) → key is accepted and saved to
+                                   ~/.ssh/known_hosts for verification on all
+                                   future connections.
+    """
+
+    def __init__(self, known_hosts_path):
+        self._path = known_hosts_path
+
+    def missing_host_key(self, client, hostname, key):
+        # First time seeing this host: persist the key so changes are caught later.
+        try:
+            ssh_dir = os.path.dirname(self._path)
+            if ssh_dir:
+                os.makedirs(ssh_dir, exist_ok=True)
+            client._host_keys.add(hostname, key.get_name(), key)
+            client.save_host_keys(self._path)
+        except Exception:
+            pass  # Can't write known_hosts — accept this session but don't persist
+
+
 def _sftp_put_windows(host, user, password, remote_dir, local_path):
     """Upload local_path into remote_dir/ on host via SFTP (paramiko).
+
+    Uses Trust-On-First-Use host key verification:
+      - First connection to a host: accepts and saves the key.
+      - Subsequent connections: verifies against the saved key.
+      - Changed key (possible MITM): upload is aborted with a clear error.
+
     Creates remote_dir if it doesn't exist. Returns (ok: bool, err: str).
     """
     try:
         import paramiko
     except ImportError:
         return False, "paramiko not installed (pip install paramiko)"
+
+    known_hosts = os.path.join(os.path.expanduser("~"), ".ssh", "known_hosts")
     try:
-        transport = paramiko.Transport((host, 22))
-        transport.connect(username=user, password=password)
-        sftp = paramiko.SFTPClient.from_transport(transport)
+        ssh = paramiko.SSHClient()
+        ssh.load_system_host_keys()          # /etc/ssh/ssh_known_hosts (if present)
+        if os.path.exists(known_hosts):
+            ssh.load_host_keys(known_hosts)  # ~/.ssh/known_hosts
+        ssh.set_missing_host_key_policy(_TOFUPolicy(known_hosts))
+
+        ssh.connect(host, port=22, username=user, password=password, timeout=15)
+        sftp = ssh.open_sftp()
         try:
             # Ensure each component of remote_dir exists
             parts = remote_dir.lstrip("/").split("/")
@@ -2144,8 +2189,14 @@ def _sftp_put_windows(host, user, password, remote_dir, local_path):
             sftp.put(local_path, remote_path)
         finally:
             sftp.close()
-        transport.close()
+        ssh.close()
         return True, ""
+    except paramiko.BadHostKeyException as exc:
+        return False, (
+            "SSH host key for {} has changed — upload aborted. "
+            "If the NAS was reinstalled or its SSH key was rotated, remove the "
+            "old entry from {} and retry.  Details: {}".format(host, known_hosts, exc)
+        )
     except Exception as e:
         return False, str(e)
 
@@ -2507,7 +2558,9 @@ def main():
     p.add_argument("--sftp-path", default=DEFAULT_SFTP_PATH,
                    help="SFTP base path on NAS for Windows archive upload")
     p.add_argument("--sftp-password", default=None,
-                   help="SFTP password (Windows); overrides SFTP_PASSWORD env var")
+                   help="SFTP password (Windows); overrides SFTP_PASSWORD env var. "
+                        "Avoid on shared machines — visible in the process list. "
+                        "Prefer seeding the OS keyring interactively instead.")
     args = p.parse_args()
 
     sys.setrecursionlimit(100_000)
