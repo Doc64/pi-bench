@@ -77,10 +77,10 @@ Source: "{#SrcDir}\_setup_python.bat";        DestDir: "{app}"; Flags: ignorever
 ; pythonw.exe is used (not python.exe) so no console window flashes on launch.
 [Icons]
 ; Start Menu
-Name: "{group}\{#AppName}";           Filename: "{app}\python\pythonw.exe"; Parameters: """{app}\pi_bench_gui_dev_llm.py"""; WorkingDir: "{app}"; Comment: "Pi Bench CPU Benchmark with AI"
-Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}";                                                             Comment: "Uninstall Pi Bench"
+Name: "{group}\{#AppName}";           Filename: "{app}\python\PiBench.exe"; Parameters: """{app}\pi_bench_gui_dev_llm.py"""; WorkingDir: "{app}"; Comment: "Pi Bench CPU Benchmark with AI"
+Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}";                                                            Comment: "Uninstall Pi Bench"
 ; Desktop (shown only if task is checked)
-Name: "{autodesktop}\{#AppName}";     Filename: "{app}\python\pythonw.exe"; Parameters: """{app}\pi_bench_gui_dev_llm.py"""; WorkingDir: "{app}"; Comment: "Pi Bench CPU Benchmark with AI"; Tasks: desktopicon
+Name: "{autodesktop}\{#AppName}";     Filename: "{app}\python\PiBench.exe"; Parameters: """{app}\pi_bench_gui_dev_llm.py"""; WorkingDir: "{app}"; Comment: "Pi Bench CPU Benchmark with AI"; Tasks: desktopicon
 
 ; ── Post-install steps ────────────────────────────────────────────────────────
 [Run]
@@ -100,7 +100,7 @@ Filename: "{app}\python\python.exe"; \
     Flags: waituntilterminated
 
 ; Optional: offer to launch the app at the end of installation
-Filename: "{app}\python\pythonw.exe"; \
+Filename: "{app}\python\PiBench.exe"; \
     Parameters: """{app}\pi_bench_gui_dev_llm.py"""; \
     WorkingDir: "{app}"; \
     Description: "Launch {#AppName} now"; \

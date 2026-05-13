@@ -42,4 +42,11 @@ echo pip ready.
 
 :done
 echo Python runtime setup complete.
+
+REM Create PiBench.exe launcher so Task Manager shows "PiBench" not "python"
+if not exist "%PYDIR%\PiBench.exe" (
+    copy /y "%PYDIR%\pythonw.exe" "%PYDIR%\PiBench.exe" >nul
+    echo PiBench.exe launcher created.
+)
+
 exit /b 0
