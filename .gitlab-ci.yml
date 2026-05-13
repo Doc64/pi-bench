@@ -1,6 +1,8 @@
 build-installer:
   tags:
     - windows
+  before_script:
+    - echo "Starting build"
   script:
     - '& "C:\Users\tom\AppData\Local\Programs\Inno Setup 7\ISCC.exe" pi_bench_setup.iss'
   artifacts:
