@@ -416,16 +416,23 @@ def lhm_fetch_sample(url=LHM_DEFAULT_URL, timeout=2.0):
         if typ:
             v = _to_float(node.get("Value"))
             if v is not None:
-                if typ == "Power" and text == "CPU Package":
+                if typ == "Power" and text in ("CPU Package", "Package"):
+                    # Intel: "CPU Package"  |  AMD: "Package"
                     sample["pkg_watt"] = v
                 elif typ == "Temperature":
-                    if text == "CPU Package":
+                    if text in ("CPU Package", "Core (Tctl/Tdie)"):
+                        # Intel: "CPU Package"  |  AMD: "Core (Tctl/Tdie)"
                         sample["pkg_tmp"] = v
                     elif text == "Core Max":
                         sample["core_max_tmp"] = v
                     elif text == "Core Average":
                         sample["core_avg_tmp"] = v
                     elif text.startswith("CPU Core #") and "Distance" not in text:
+                        # Intel per-core temps
+                        sample["core_temps"].append(v)
+                        sample["core_temp_names"].append(text)
+                    elif text in ("CCD1 (Tdie)", "CCD2 (Tdie)") and not sample["core_temps"]:
+                        # AMD CCD-level temps as fallback (no per-core temps on Ryzen)
                         sample["core_temps"].append(v)
                         sample["core_temp_names"].append(text)
                 elif typ == "Load":
@@ -433,9 +440,17 @@ def lhm_fetch_sample(url=LHM_DEFAULT_URL, timeout=2.0):
                         sample["cpu_busy"] = v
                     elif text.startswith("CPU Core #"):
                         sample["core_loads"].append(v)
-                elif typ == "Clock" and text.startswith("CPU Core #"):
-                    sample["core_clocks"].append(v)
-                    sample["core_clock_names"].append(text)
+                elif typ == "Clock":
+                    if text.startswith("CPU Core #"):
+                        # Intel: "CPU Core #1", "CPU Core #2", ...
+                        sample["core_clocks"].append(v)
+                        sample["core_clock_names"].append(text)
+                    elif (text.startswith("Core #")
+                          and "(Effective)" not in text
+                          and "Cores" not in text):
+                        # AMD: "Core #0", "Core #1", ... (excludes "Core #0 Effective" etc.)
+                        sample["core_clocks"].append(v)
+                        sample["core_clock_names"].append(text)
                 elif typ == "Fan":
                     sample["fans"][text or "fan"] = v
         for child in node.get("Children") or []:
