@@ -481,7 +481,7 @@ class LlmSplashScreen(_SplashBase):
     def __init__(self):
         # Don't call super().__init__() — rebuild ourselves with LlmStartupChecker
         QWidget.__init__(self)
-        self.setWindowTitle("Pi Bench")
+        self.setWindowTitle("Pi Benchmark")
         self.setFixedSize(460, 440)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setStyleSheet(f"background:{DARK_BG};border:1px solid {SUBTLE};")
