@@ -1,0 +1,64 @@
+name: Release
+
+# Triggers on any tag that looks like v1.2.3
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    permissions:
+      contents: write   # required to create GitHub releases and upload assets
+
+    steps:
+      # ── 1. Check out the code ──────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. Extract version + changelog section ────────────────────────
+      - name: Extract version and changelog
+        id: ver
+        shell: pwsh
+        run: |
+          $line = Select-String '^APP_VERSION\s*=\s*"(.+)"' pi_bench.py
+          $ver  = $line.Matches[0].Groups[1].Value
+          if (-not $ver) { Write-Error "APP_VERSION not found in pi_bench.py"; exit 1 }
+          echo "VERSION=$ver" >> $env:GITHUB_OUTPUT
+          Write-Host "Building version: $ver"
+
+          # Extract the section for this version from CHANGELOG.md
+          # Matches from "## [x.y.z]" up to (but not including) the next "## ["
+          $changelog = Get-Content CHANGELOG.md -Raw
+          $pattern   = "(?s)## \[$([regex]::Escape($ver))\][^\n]*\n(.+?)(?=\n## \[|\z)"
+          $m         = [regex]::Match($changelog, $pattern)
+          if ($m.Success) {
+            $notes = $m.Groups[1].Value.Trim()
+          } else {
+            $notes = "See [CHANGELOG](CHANGELOG.md) for details."
+          }
+          # Write to a file so the next step can read it (avoids multiline env var issues)
+          $notes | Out-File -FilePath release_notes.md -Encoding utf8
+          Write-Host "Release notes extracted ($($notes.Length) chars)"
+
+      # ── 3. Install Inno Setup via Chocolatey ──────────────────────────
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      # ── 4. Build the installer ────────────────────────────────────────
+      - name: Build installer
+        shell: cmd
+        env:
+          CI_APP_VERSION: ${{ steps.ver.outputs.VERSION }}
+        run: build_installer.bat
+
+      # ── 5. Create GitHub release and upload installer ─────────────────
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Pi Bench ${{ steps.ver.outputs.VERSION }}"
+          tag_name: ${{ github.ref_name }}
+          body_path: release_notes.md
+          files: dist/PiBenchSetup-${{ steps.ver.outputs.VERSION }}.exe
