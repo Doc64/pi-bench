@@ -9,6 +9,29 @@ Versioning:
 
 ---
 
+## [2.0.0] — 2026-05-14
+
+### Added
+- **On-device AI analysis** — a new "AI Analysis" tab in the Results view
+  streams a real-time diagnostic report from **Phi-3.5 Mini Instruct Q4_K_M**
+  (~2.2 GB, runs 100 % locally, CPU-only via gpt4all).  The model is
+  downloaded automatically on first launch and verified with SHA-256.
+  It analyses every captured metric — throughput, parallel efficiency, clock
+  boost sustainability, thermal resistance, throttle events, cool-down rate —
+  and returns five paragraphs of actionable feedback.
+- **In-app theme switcher** — Settings → Theme → "Classic (dark)" or
+  "Frutiger Aero" → **Apply & Restart**.  Both themes now carry identical
+  feature sets (LLM included).  The separate "Pi Bench Aero" Start Menu
+  shortcut is removed; theme choice lives inside the app.
+
+### Changed
+- Single "Pi Bench" Start Menu / desktop shortcut.  Users switch themes from
+  within the app; no re-install required.
+- Startup splash lists two additional checks: `gpt4all` and `LLM model`.
+  On first launch the model auto-downloads (~2.2 GB) in the background.
+
+---
+
 ## [1.0.1] — 2026-05-14
 
 ### Added

@@ -80,16 +80,11 @@ Source: "{#SrcDir}\_setup_python.bat";        DestDir: "{app}"; Flags: ignorever
 
 ; ── Shortcuts ─────────────────────────────────────────────────────────────────
 ; PiBench.exe is a pythonw.exe wrapper — no console window on launch.
+; Theme is chosen inside the app (Settings → Theme → Apply & Restart).
 [Icons]
-; Start Menu — classic theme
-Name: "{group}\{#AppName}";                Filename: "{app}\python\PiBench.exe"; Parameters: """{app}\pi_bench_gui_dev.py""";      WorkingDir: "{app}"; Comment: "Pi Bench CPU Benchmark"
-; Start Menu — Frutiger Aero theme
-Name: "{group}\{#AppName} Aero";           Filename: "{app}\python\PiBench.exe"; Parameters: """{app}\pi_bench_gui_aero.py""";     WorkingDir: "{app}"; Comment: "Pi Bench CPU Benchmark — Frutiger Aero theme"
-; Start Menu — uninstall
-Name: "{group}\Uninstall {#AppName}";      Filename: "{uninstallexe}";                                                             Comment: "Uninstall Pi Bench"
-; Desktop shortcuts (shown only if task is checked)
-Name: "{autodesktop}\{#AppName}";          Filename: "{app}\python\PiBench.exe"; Parameters: """{app}\pi_bench_gui_dev.py""";      WorkingDir: "{app}"; Comment: "Pi Bench CPU Benchmark"; Tasks: desktopicon
-Name: "{autodesktop}\{#AppName} Aero";     Filename: "{app}\python\PiBench.exe"; Parameters: """{app}\pi_bench_gui_aero.py""";     WorkingDir: "{app}"; Comment: "Pi Bench CPU Benchmark — Frutiger Aero theme"; Tasks: desktopicon
+Name: "{group}\{#AppName}";           Filename: "{app}\python\PiBench.exe"; Parameters: """{app}\pi_bench_gui_dev.py"""; WorkingDir: "{app}"; Comment: "Pi Bench CPU Benchmark"
+Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}";                                                        Comment: "Uninstall Pi Bench"
+Name: "{autodesktop}\{#AppName}";     Filename: "{app}\python\PiBench.exe"; Parameters: """{app}\pi_bench_gui_dev.py"""; WorkingDir: "{app}"; Comment: "Pi Bench CPU Benchmark"; Tasks: desktopicon
 
 ; ── Post-install steps ────────────────────────────────────────────────────────
 [Run]
