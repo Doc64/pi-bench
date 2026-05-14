@@ -31,19 +31,31 @@ import pyqtgraph as pg
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pi_bench as pb
 
-# ── Palette ────────────────────────────────────────────────────────────────
-DARK_BG   = "#1e1e2e"
-PANEL_BG  = "#2a2a3e"
-ACCENT    = "#cba6f7"
-TEXT      = "#cdd6f4"
-SUBTLE    = "#6c7086"
-COL_TEMP  = "#f38ba8"
-COL_POWER = "#fab387"
-COL_FREQ  = "#89dceb"
-COL_BUSY  = "#a6e3a1"
-COL_GOOD  = "#a6e3a1"
-COL_WARN  = "#f9e2af"
-COL_CRIT  = "#f38ba8"
+# ── Frutiger Aero palette ───────────────────────────────────────────────────
+# Sky-blue backgrounds, white frosted-glass panels, bright aqua accents,
+# chrome gloss buttons.  Think Windows Vista Aero / Zune / mid-2000s
+# "clean tech + nature" aesthetic.
+DARK_BG   = "#0B2850"   # rich midnight-sky blue — main window bg
+PANEL_BG  = "#071A34"   # deeper navy — chart / log areas
+ACCENT    = "#00DDFF"   # vivid sky-aqua
+TEXT      = "#FFFFFF"   # pure white (on dark) / deep navy on glass
+SUBTLE    = "#5A90CC"   # cornflower blue — secondary text
+COL_TEMP  = "#FF7040"   # warm orange — temperature
+COL_POWER = "#C060FF"   # violet — power
+COL_FREQ  = "#00FFEE"   # bright teal-cyan — frequency
+COL_BUSY  = "#60FF90"   # lime green — CPU load
+COL_GOOD  = "#40EE80"   # green confirmation
+COL_WARN  = "#FFDD44"   # amber warning
+COL_CRIT  = "#FF4455"   # soft red critical
+
+# Glass helpers — WHITE-tinted borders/fills are what make it feel like
+# actual frosted glass rather than just another dark theme.
+# _GLASS_HI must be high-alpha white for the classic Frutiger Aero "ice cap"
+# specular — the top quarter of every panel should look like frosted glass
+# catching direct light.
+_GLASS_BORDER = "rgba(255,255,255,140)"  # bright white glass border
+_GLASS_FILL   = "rgba(255,255,255,10)"   # nearly transparent — sky shows through
+_GLASS_HI     = "rgba(255,255,255,215)"  # very bright white top gloss (was 60)
 
 RUNS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pi_bench_runs")
 
@@ -81,6 +93,7 @@ for _sig in (signal.SIGTERM, signal.SIGINT):
 
 
 def _apply_dark_palette(app: QApplication):
+    """Apply the Frutiger Aero palette + comprehensive global stylesheet."""
     app.setStyle("Fusion")
     pal = QPalette()
     for role, hex_col in [
@@ -95,10 +108,270 @@ def _apply_dark_palette(app: QApplication):
         (QPalette.ColorRole.ButtonText,      TEXT),
         (QPalette.ColorRole.BrightText,      "#ffffff"),
         (QPalette.ColorRole.Highlight,       ACCENT),
-        (QPalette.ColorRole.HighlightedText, "#000000"),
+        (QPalette.ColorRole.HighlightedText, "#001428"),
     ]:
         pal.setColor(role, QColor(hex_col))
     app.setPalette(pal)
+
+    # ── Global Frutiger Aero stylesheet ──────────────────────────────────────
+    # Key principles:
+    #  • WHITE glass borders (not blue) — makes panels look like frosted glass
+    #  • Prominent white top-half on buttons (chrome gloss)
+    #  • Sky-blue gradients, not flat dark fills
+    #  • Pure white text for maximum contrast on the deep-blue bg
+    app.setStyleSheet(f"""
+
+/* ── Base ── */
+QWidget {{
+    font-family: "Segoe UI", "Trebuchet MS", Arial, sans-serif;
+    font-size: 9pt;
+    color: {TEXT};
+}}
+
+/* ── Main window background: sky-blue gradient top→bottom ── */
+QMainWindow, QDialog {{
+    background: qlineargradient(x1:0,y1:0,x2:0.2,y2:1,
+        stop:0 #2060A8, stop:0.35 #0E3870, stop:0.7 {DARK_BG}, stop:1 #061020);
+}}
+
+/* ── Frosted glass group boxes ── */
+QGroupBox {{
+    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        stop:0    {_GLASS_HI},
+        stop:0.18 rgba(255,255,255,80),
+        stop:0.35 {_GLASS_FILL},
+        stop:1    rgba(10,50,130,25));
+    border: 1px solid {_GLASS_BORDER};
+    border-radius: 10px;
+    margin-top: 12px;
+    padding-top: 10px;
+    font-weight: bold;
+    font-size: 8pt;
+}}
+QGroupBox::title {{
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 12px;
+    padding: 0 5px;
+    color: {ACCENT};
+    font-size: 8pt;
+}}
+
+/* ── Input fields — inset glass ── */
+QLineEdit, QSpinBox, QComboBox {{
+    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        stop:0 rgba(0,10,30,180), stop:1 rgba(0,20,60,160));
+    border: 1px solid {_GLASS_BORDER};
+    border-radius: 6px;
+    padding: 3px 8px;
+    color: {TEXT};
+    selection-background-color: {ACCENT};
+    selection-color: #001030;
+}}
+QLineEdit:focus, QSpinBox:focus, QComboBox:focus {{
+    border: 1px solid {ACCENT};
+    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        stop:0 rgba(0,20,60,200), stop:1 rgba(0,40,100,200));
+}}
+QTextEdit {{
+    background: rgba(4,12,28,210);
+    border: 1px solid {_GLASS_BORDER};
+    border-radius: 8px;
+    padding: 4px;
+    color: {TEXT};
+    selection-background-color: {ACCENT};
+    selection-color: #001030;
+}}
+QSpinBox::up-button, QSpinBox::down-button {{
+    background: rgba(255,255,255,30);
+    border: 1px solid {_GLASS_BORDER};
+    border-radius: 3px;
+    width: 16px;
+}}
+QSpinBox::up-button:hover, QSpinBox::down-button:hover {{
+    background: rgba(0,200,255,80);
+}}
+QComboBox::drop-down {{
+    border: none;
+    width: 20px;
+}}
+QComboBox QAbstractItemView {{
+    background: #0B2850;
+    border: 1px solid {_GLASS_BORDER};
+    selection-background-color: rgba(0,220,255,60);
+    color: {TEXT};
+    outline: none;
+}}
+
+/* ── Generic buttons: chrome gloss (white top half, blue bottom) ── */
+QPushButton {{
+    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        stop:0   rgba(255,255,255,80),
+        stop:0.45 rgba(255,255,255,30),
+        stop:0.5  rgba(0,100,200,60),
+        stop:1    rgba(0,60,140,100));
+    border: 1px solid {_GLASS_BORDER};
+    border-radius: 7px;
+    padding: 4px 14px;
+    color: {TEXT};
+    font-weight: 500;
+}}
+QPushButton:hover {{
+    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        stop:0   rgba(255,255,255,120),
+        stop:0.45 rgba(255,255,255,60),
+        stop:0.5  rgba(0,180,255,80),
+        stop:1    rgba(0,100,200,120));
+    border: 1px solid rgba(255,255,255,180);
+    color: #ffffff;
+}}
+QPushButton:pressed {{
+    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        stop:0 rgba(0,100,200,120), stop:1 rgba(0,50,120,180));
+    border: 1px solid {ACCENT};
+}}
+QPushButton:disabled {{
+    background: rgba(20,50,90,0.5);
+    color: {SUBTLE};
+    border-color: rgba(255,255,255,30);
+}}
+
+/* ── Checkboxes ── */
+QCheckBox {{
+    color: {TEXT};
+    spacing: 7px;
+}}
+QCheckBox::indicator {{
+    width: 14px; height: 14px;
+    border: 1px solid {_GLASS_BORDER};
+    border-radius: 4px;
+    background: rgba(0,10,40,0.8);
+}}
+QCheckBox::indicator:checked {{
+    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        stop:0 rgba(100,240,255,240), stop:1 rgba(0,160,220,240));
+    border-color: {ACCENT};
+}}
+
+/* ── Scrollbars — slim glass ── */
+QScrollBar:vertical {{
+    background: rgba(255,255,255,12);
+    width: 7px; border-radius: 3px; margin: 0;
+    border: 1px solid rgba(255,255,255,20);
+}}
+QScrollBar::handle:vertical {{
+    background: rgba(255,255,255,70);
+    border-radius: 3px; min-height: 24px;
+}}
+QScrollBar::handle:vertical:hover {{
+    background: {ACCENT};
+}}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+QScrollBar:horizontal {{
+    background: rgba(255,255,255,12);
+    height: 7px; border-radius: 3px; margin: 0;
+    border: 1px solid rgba(255,255,255,20);
+}}
+QScrollBar::handle:horizontal {{
+    background: rgba(255,255,255,70);
+    border-radius: 3px; min-width: 24px;
+}}
+QScrollBar::handle:horizontal:hover {{
+    background: {ACCENT};
+}}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
+
+/* ── Glass transparency for labels/checkboxes inside panels ── */
+/* Without this every QLabel inside a GroupBox paints an opaque slab   */
+/* that covers the sky-gradient showing through the glass fill.        */
+QGroupBox QLabel, QGroupBox QCheckBox, QGroupBox QFrame {{
+    background: transparent;
+}}
+
+/* ── Tab widget ── */
+QTabWidget::pane {{
+    border: 1px solid {_GLASS_BORDER};
+    border-radius: 0 8px 8px 8px;
+    background: rgba(8,25,72,160);
+}}
+QTabBar::tab {{
+    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        stop:0 rgba(255,255,255,50),
+        stop:0.5 rgba(255,255,255,18),
+        stop:1 rgba(0,40,100,60));
+    color: rgba(255,255,255,140);
+    padding: 7px 20px;
+    border: 1px solid {_GLASS_BORDER};
+    border-bottom: none;
+    border-radius: 8px 8px 0 0;
+    margin-right: 2px;
+    font-size: 9pt;
+}}
+QTabBar::tab:selected {{
+    color: {TEXT};
+    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        stop:0 rgba(255,255,255,90),
+        stop:0.5 rgba(255,255,255,35),
+        stop:1 rgba(0,100,200,80));
+    border-bottom: 2px solid {ACCENT};
+}}
+QTabBar::tab:hover:!selected {{
+    color: {ACCENT};
+    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        stop:0 rgba(255,255,255,70),
+        stop:0.5 rgba(255,255,255,30),
+        stop:1 rgba(0,80,180,70));
+}}
+
+/* ── Tables ── */
+QTableWidget {{
+    background: rgba(4,12,28,210);
+    border: 1px solid {_GLASS_BORDER};
+    border-radius: 8px;
+    gridline-color: rgba(255,255,255,18);
+    color: {TEXT};
+    outline: none;
+}}
+QTableWidget::item:selected {{
+    background: rgba(0,220,255,55);
+    color: #ffffff;
+}}
+QHeaderView::section {{
+    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        stop:0 rgba(255,255,255,55), stop:1 rgba(0,80,180,80));
+    border: 1px solid {_GLASS_BORDER};
+    padding: 5px 8px;
+    color: {ACCENT};
+    font-weight: bold;
+    font-size: 8pt;
+}}
+
+/* ── Lists ── */
+QListWidget {{
+    background: rgba(4,12,28,210);
+    border: 1px solid {_GLASS_BORDER};
+    border-radius: 8px;
+    color: {TEXT};
+    outline: none;
+}}
+QListWidget::item:selected {{
+    background: rgba(0,220,255,55);
+    color: #ffffff;
+}}
+QListWidget::item:hover {{
+    background: rgba(255,255,255,18);
+}}
+
+/* ── Splitter ── */
+QSplitter::handle {{
+    background: rgba(255,255,255,30);
+}}
+
+/* ── Separators ── */
+QFrame[frameShape="4"], QFrame[frameShape="5"] {{
+    color: rgba(255,255,255,50);
+}}
+""")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -248,7 +521,7 @@ class SplashScreen(QWidget):
         self._btn.setStyleSheet(
             f"QPushButton{{background:{ACCENT};color:#000;font-weight:bold;"
             f"border-radius:6px;font-size:12pt;}}"
-            f"QPushButton:hover{{background:#b4befe;}}"
+            f"QPushButton:hover{{background:#40DFFF;}}"
             f"QPushButton:disabled{{background:{SUBTLE};color:#555;}}")
         self._btn.clicked.connect(self.launch_requested)
         root.addWidget(self._btn)
@@ -791,8 +1064,16 @@ class DualLiveChart(QWidget):
 
         self._tabs = QTabWidget()
         self._tabs.setStyleSheet(
-            f"QTabBar::tab{{background:{PANEL_BG};color:{SUBTLE};padding:4px 14px;font-size:9pt;}}"
-            f"QTabBar::tab:selected{{color:{TEXT};border-bottom:2px solid {ACCENT};}}")
+            "QTabBar::tab{"
+            "background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+            f"stop:0 rgba(255,255,255,50),stop:1 rgba(0,40,100,60));"
+            f"color:rgba(255,255,255,140);padding:4px 14px;font-size:9pt;"
+            f"border:1px solid rgba(255,255,255,80);border-bottom:none;"
+            f"border-radius:6px 6px 0 0;margin-right:2px;}}"
+            f"QTabBar::tab:selected{{color:{TEXT};border-bottom:2px solid {ACCENT};"
+            "background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+            "stop:0 rgba(255,255,255,90),stop:1 rgba(0,100,200,70));}"
+            f"QTabWidget::pane{{background:transparent;border:none;}}")
         lay.addWidget(self._tabs, 1)
 
         self._charts: dict[str, LiveChart] = {}
@@ -859,6 +1140,7 @@ class DualLiveChart(QWidget):
 class StatBar(QWidget):
     def __init__(self):
         super().__init__()
+        self.setStyleSheet("background:transparent;")
         row = QHBoxLayout(self)
         row.setContentsMargins(6,4,6,4); row.setSpacing(24)
 
@@ -1056,7 +1338,7 @@ class CompareTab(QWidget):
         compare_btn.setStyleSheet(
             f"QPushButton{{background:{ACCENT};color:#000;font-weight:bold;"
             f"border-radius:4px;padding:0 16px;}}"
-            f"QPushButton:hover{{background:#b4befe;}}")
+            f"QPushButton:hover{{background:#40DFFF;}}")
         compare_btn.clicked.connect(self._do_compare)
         sel_row.addWidget(compare_btn)
         root.addLayout(sel_row)
@@ -1308,7 +1590,9 @@ class UpdateBar(QWidget):
         self.hide()
         self.setFixedHeight(36)
         self.setStyleSheet(
-            f"background:#313244; border-bottom:1px solid {ACCENT};")
+            "background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+            f"stop:0 rgba(0,80,160,120),stop:1 rgba(0,40,90,180));"
+            f"border-bottom:2px solid {ACCENT};")
         row = QHBoxLayout(self)
         row.setContentsMargins(14, 0, 8, 0); row.setSpacing(10)
 
@@ -1322,10 +1606,13 @@ class UpdateBar(QWidget):
 
         self._dl_btn = QPushButton("Download & Install")
         self._dl_btn.setStyleSheet(
-            f"QPushButton{{background:{ACCENT};color:#000;font-weight:bold;"
-            f"border-radius:4px;padding:2px 12px;font-size:9pt;}}"
-            f"QPushButton:hover{{background:#b4befe;}}"
-            f"QPushButton:disabled{{background:{SUBTLE};color:#888;}}")
+            "QPushButton{background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+            "stop:0 #40E8FF,stop:0.48 #00AADD,stop:0.52 #0088BB,stop:1 #005577);"
+            f"color:#001828;font-weight:bold;border-radius:5px;"
+            f"padding:2px 12px;font-size:9pt;border:1px solid rgba(0,220,255,180);}}"
+            "QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+            "stop:0 #70F0FF,stop:0.48 #20CCEE,stop:0.52 #00AACC,stop:1 #006688);}"
+            f"QPushButton:disabled{{background:rgba(0,40,80,0.5);color:{SUBTLE};}}")
         self._dl_btn.clicked.connect(self._on_install)
         row.addWidget(self._dl_btn)
 
@@ -1480,7 +1767,7 @@ class SettingsPanel(QWidget):
             if not self.run_tag.text().strip():
                 self.run_tag.setText(spec)
             self._tag_status.setText(f"detected: {spec}")
-            self._tag_status.setStyleSheet("color:#a6e3a1;font-size:8pt;")
+            self._tag_status.setStyleSheet(f"color:{COL_GOOD};font-size:8pt;")
         else:
             self._tag_status.setText("auto-detect unavailable — enter manually")
             self._tag_status.setStyleSheet(f"color:{SUBTLE};font-size:8pt;")
@@ -1492,7 +1779,7 @@ class SettingsPanel(QWidget):
         if pw is not None:
             self._keyring_pw = pw
             self._kr_lbl.setText("✓ password loaded from keyring")
-            self._kr_lbl.setStyleSheet("color:#a6e3a1;font-size:8pt;")
+            self._kr_lbl.setStyleSheet(f"color:{COL_GOOD};font-size:8pt;")
         else:
             self._keyring_pw = None
             if self._pw_field.text().strip():
@@ -1567,6 +1854,19 @@ class MainWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
 
+        # Sky-blue gradient painted directly on the central widget so it
+        # shows through the transparent glass panels above it.
+        central.setObjectName("_central")
+        central.setStyleSheet(
+            "QWidget#_central{"
+            "background:qlineargradient(x1:0.3,y1:0,x2:0.7,y2:1,"
+            "stop:0 #6EC8F8,"       # bright sky-blue top
+            "stop:0.12 #3A9AE8,"   # mid sky
+            "stop:0.35 #1A5CC0,"   # deeper blue
+            "stop:0.65 #0B2850,"   # midnight blue
+            "stop:1    #04091A);}" # near-black base
+        )
+
         # Outer vertical layout: update bar (hidden by default) + main content
         outer = QVBoxLayout(central)
         outer.setContentsMargins(0, 0, 0, 0); outer.setSpacing(0)
@@ -1575,6 +1875,7 @@ class MainWindow(QMainWindow):
         outer.addWidget(self._update_bar)
 
         inner = QWidget()
+        inner.setStyleSheet("background:transparent;")   # let sky gradient show through
         outer.addWidget(inner, 1)
         root = QHBoxLayout(inner)
         root.setContentsMargins(10,10,10,10); root.setSpacing(10)
@@ -1616,10 +1917,29 @@ class MainWindow(QMainWindow):
         self.run_btn = QPushButton("▶  Run Benchmark")
         self.run_btn.setMinimumHeight(46)
         self.run_btn.setStyleSheet(
-            f"QPushButton{{background:{ACCENT};color:#000;font-weight:bold;"
-            f"border-radius:6px;font-size:12pt;}}"
-            f"QPushButton:hover{{background:#b4befe;}}"
-            f"QPushButton:disabled{{background:{SUBTLE};color:#888;}}")
+            # Chrome-gloss aqua pill — classic Frutiger Aero "gel" button:
+            # bright white upper half, deep aqua lower half, white border glow
+            "QPushButton{"
+            "background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+            "stop:0 rgba(255,255,255,230),"   # bright white top gloss
+            "stop:0.46 rgba(0,220,255,200),"  # aqua mid-top
+            "stop:0.5  rgba(0,160,220,230),"  # seam
+            "stop:1    rgba(0,80,160,255));"  # deep blue bottom
+            "color:#001830;font-weight:bold;border-radius:12px;font-size:12pt;"
+            "border:1px solid rgba(255,255,255,200);"
+            "}"
+            "QPushButton:hover{"
+            "background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+            "stop:0 rgba(255,255,255,255),"
+            "stop:0.46 rgba(80,240,255,220),"
+            "stop:0.5  rgba(0,200,240,240),"
+            "stop:1    rgba(0,120,200,255));"
+            "border:1px solid rgba(255,255,255,255);}"
+            "QPushButton:pressed{"
+            "background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+            "stop:0 rgba(0,120,200,255),stop:1 rgba(0,60,140,255));}"
+            f"QPushButton:disabled{{background:rgba(20,50,90,0.6);"
+            f"color:{SUBTLE};border-color:rgba(255,255,255,40);}}")
         self.run_btn.clicked.connect(self._start)
         left.addWidget(self.run_btn)
         self.status_lbl = QLabel("Ready")
@@ -1628,15 +1948,15 @@ class MainWindow(QMainWindow):
         left.addWidget(self.status_lbl)
         left_w = QWidget(); left_w.setLayout(left)
         left_w.setFixedWidth(180)
+        left_w.setStyleSheet("background:transparent;")  # let sky show through sidebar
 
         # ── Right: tab widget ────────────────────────────────────────────
         self._tabs = QTabWidget()
-        self._tabs.setStyleSheet(
-            f"QTabBar::tab{{background:{PANEL_BG};color:{SUBTLE};padding:7px 18px;font-size:9pt;}}"
-            f"QTabBar::tab:selected{{color:{TEXT};border-bottom:2px solid {ACCENT};}}")
+        # Global QSS handles tab styling; no inline override needed.
 
         # Tab 0 — Live
         live_w = QWidget()
+        live_w.setStyleSheet("background:transparent;")
         ll     = QVBoxLayout(live_w); ll.setContentsMargins(0,0,0,0); ll.setSpacing(6)
         self.stat_bar = StatBar(); ll.addWidget(self.stat_bar)
         spl   = QSplitter(Qt.Orientation.Vertical)
@@ -1672,7 +1992,8 @@ class MainWindow(QMainWindow):
         _settings_scroll = QScrollArea()
         _settings_scroll.setWidgetResizable(True)
         _settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        _settings_scroll.setStyleSheet("QScrollArea{border:none;}")
+        _settings_scroll.setStyleSheet("QScrollArea{border:none;background:transparent;}"
+                                        "QScrollArea>QWidget>QWidget{background:transparent;}")
         _settings_scroll.setWidget(self.settings)
         self._tabs.addTab(_settings_scroll, "⚙  Settings")
 
@@ -1723,15 +2044,24 @@ class MainWindow(QMainWindow):
                 tmp_dir = tempfile.mkdtemp(prefix="pibench_update_")
                 installer = os.path.join(tmp_dir, f"PiBenchSetup_{version}.exe")
                 urllib.request.urlretrieve(url, installer)
-                # /SILENT   — shows progress window but no wizard pages
+
+                # Launch the installer as a fully detached process so it
+                # survives after this process exits.
+                # /SILENT    — progress window, no wizard pages
                 # /NORESTART — never auto-reboot
-                # /CLOSEAPPLICATIONS — asks running instances to close gracefully
-                subprocess.Popen(
-                    [installer, "/SILENT", "/NORESTART", "/CLOSEAPPLICATIONS"],
-                    creationflags=subprocess.DETACHED_PROCESS
-                    if hasattr(subprocess, "DETACHED_PROCESS") else 0,
-                )
-                QApplication.quit()
+                # Do NOT pass /CLOSEAPPLICATIONS — that tells Inno Setup to
+                # kill running instances itself, which deadlocks because this
+                # process is still alive waiting for the Popen to return.
+                # We close ourselves immediately below instead.
+                flags = 0
+                if hasattr(subprocess, "DETACHED_PROCESS"):
+                    flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+                subprocess.Popen([installer, "/SILENT", "/NORESTART"], creationflags=flags)
+
+                # Quit must be scheduled on the main thread — calling
+                # QApplication.quit() directly from a worker thread is not
+                # thread-safe and will be silently ignored by Qt.
+                QTimer.singleShot(0, QApplication.quit)
             except Exception as exc:
                 self._update_failed.emit(str(exc))
                 self.run_btn.setEnabled(True)
@@ -1817,7 +2147,7 @@ class MainWindow(QMainWindow):
 
 def main():
     mp.freeze_support()
-    pg.setConfigOptions(antialias=True, background=DARK_BG, foreground=TEXT)
+    pg.setConfigOptions(antialias=True, background=PANEL_BG, foreground=SUBTLE)
     app = QApplication(sys.argv)
     _apply_dark_palette(app)
 

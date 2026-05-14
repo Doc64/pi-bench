@@ -2043,15 +2043,24 @@ class MainWindow(QMainWindow):
                 tmp_dir = tempfile.mkdtemp(prefix="pibench_update_")
                 installer = os.path.join(tmp_dir, f"PiBenchSetup_{version}.exe")
                 urllib.request.urlretrieve(url, installer)
-                # /SILENT   — shows progress window but no wizard pages
+
+                # Launch the installer as a fully detached process so it
+                # survives after this process exits.
+                # /SILENT    — progress window, no wizard pages
                 # /NORESTART — never auto-reboot
-                # /CLOSEAPPLICATIONS — asks running instances to close gracefully
-                subprocess.Popen(
-                    [installer, "/SILENT", "/NORESTART", "/CLOSEAPPLICATIONS"],
-                    creationflags=subprocess.DETACHED_PROCESS
-                    if hasattr(subprocess, "DETACHED_PROCESS") else 0,
-                )
-                QApplication.quit()
+                # Do NOT pass /CLOSEAPPLICATIONS — that tells Inno Setup to
+                # kill running instances itself, which deadlocks because this
+                # process is still alive waiting for the Popen to return.
+                # We close ourselves immediately below instead.
+                flags = 0
+                if hasattr(subprocess, "DETACHED_PROCESS"):
+                    flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+                subprocess.Popen([installer, "/SILENT", "/NORESTART"], creationflags=flags)
+
+                # Quit must be scheduled on the main thread — calling
+                # QApplication.quit() directly from a worker thread is not
+                # thread-safe and will be silently ignored by Qt.
+                QTimer.singleShot(0, QApplication.quit)
             except Exception as exc:
                 self._update_failed.emit(str(exc))
                 self.run_btn.setEnabled(True)

@@ -2,6 +2,26 @@
 
 All notable changes to Pi Bench are documented here.
 
+Versioning:
+- `X.0.0` — new feature
+- `1.x.0` — bug fix
+- `1.0.x` — cosmetic / theme change
+
+---
+
+## [1.1.0] — 2026-05-14
+
+### Fixed
+- **Update system deadlock** — clicking "Download & Install" froze the app
+  and the new version never launched. Root causes:
+  1. `/CLOSEAPPLICATIONS` flag told Inno Setup to kill the running app, but
+     the app was blocked waiting for the installer — mutual deadlock.
+  2. `QApplication.quit()` was called from a background thread, which is not
+     thread-safe in Qt and was silently ignored.
+  Fixed by removing `/CLOSEAPPLICATIONS` (the app now closes itself) and
+  scheduling the quit via `QTimer.singleShot(0, QApplication.quit)` so it
+  runs on the main thread.
+
 ---
 
 ## [1.0.1] — 2026-05-14
