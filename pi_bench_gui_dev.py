@@ -697,7 +697,7 @@ class BenchmarkThread(QThread):
         pb.sys.stdin = _NoTTY()
 
         archive_state = {"enabled": False}
-        if args.archive:
+        if args.archive or platform.system() == "Linux":
             self.archive_status.emit("[archive] setting up…")
             archive_state = pb.archive_setup(args)
             pb.sys.stdin = old_stdin
@@ -837,7 +837,7 @@ class BenchmarkThread(QThread):
 
             self.run_report.emit(report)
 
-            if args.archive:
+            if archive_state.get("enabled"):
                 self.archive_status.emit("[archive] finalising…")
                 pb.archive_finalize(args, archive_state, bench_text)
                 self.archive_status.emit("[archive] done")
