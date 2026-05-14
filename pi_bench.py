@@ -72,7 +72,7 @@ APP_VERSION = "2.0.0"
 # Set to "owner/repo" of the GitHub project that hosts releases.
 # The update checker looks for the latest release asset named *.exe.
 # Leave empty to disable update checks.
-_UPDATE_GITHUB_REPO = ""
+_UPDATE_GITHUB_REPO = "Doc64/pi-bench"
 
 
 def check_for_update() -> "tuple[str, str] | tuple[None, None]":
