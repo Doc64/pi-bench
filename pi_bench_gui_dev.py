@@ -1300,6 +1300,11 @@ class HistoryTab(QWidget):
 # ═══════════════════════════════════════════════════════════════════════════
 
 class SettingsPanel(QWidget):
+    # Signal used to return the auto-detect result to the main thread.
+    # QTimer.singleShot from a worker thread is unreliable (no event loop);
+    # signals are the correct Qt mechanism for thread → main-thread callbacks.
+    _autodetect_result = pyqtSignal(object)   # str | None
+
     def __init__(self):
         super().__init__()
         self.setFixedWidth(230)
@@ -1350,6 +1355,8 @@ class SettingsPanel(QWidget):
         tl.addWidget(self._tag_status)
         root.addWidget(tag_grp)
 
+        # Wire signal → slot before triggering the worker
+        self._autodetect_result.connect(self._on_autodetect)
         # Kick off auto-detect in background after the UI is shown
         QTimer.singleShot(200, self._run_autodetect)
 
@@ -1380,7 +1387,12 @@ class SettingsPanel(QWidget):
         root.addStretch()
 
     def _run_autodetect(self):
-        """Detect RAM spec in a background thread so the UI never blocks."""
+        """Detect RAM spec in a background thread so the UI never blocks.
+
+        The worker emits _autodetect_result (a pyqtSignal) rather than calling
+        QTimer.singleShot — signals are the correct way to marshal a result from
+        a plain Python thread back onto the Qt main thread.
+        """
         import threading
         self._tag_status.setText("detecting…")
         self._tag_status.setStyleSheet(f"color:{SUBTLE};font-size:8pt;")
@@ -1388,7 +1400,7 @@ class SettingsPanel(QWidget):
 
         def _worker():
             spec = pb.detect_ram_spec()
-            QTimer.singleShot(0, lambda: self._on_autodetect(spec))
+            self._autodetect_result.emit(spec)  # always safe to emit from any thread
 
         threading.Thread(target=_worker, daemon=True).start()
 
