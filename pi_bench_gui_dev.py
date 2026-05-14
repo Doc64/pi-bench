@@ -295,6 +295,7 @@ class RunHistory:
             "run_id":         run_id,
             "timestamp":      datetime.datetime.now().isoformat(),
             "cpu":            report.get("cpu", ""),
+            "run_tag":        report.get("run_tag", ""),
             "results":        report.get("results", {}),
             "summary":        report.get("summary"),
             "summary_text":   report.get("summary_text", ""),
@@ -519,6 +520,7 @@ class BenchmarkThread(QThread):
             sftp_user=cfg.get("sftp_user", pb.DEFAULT_SFTP_USER),
             sftp_path=pb.DEFAULT_SFTP_PATH,
             sftp_password=cfg.get("sftp_password"),
+            run_tag=cfg.get("run_tag", ""),
         )
         pb.sys.setrecursionlimit(100_000)
         pb._raise_int_str_limit(args.digits)
@@ -629,6 +631,7 @@ class BenchmarkThread(QThread):
                 "fan_text":         None,
                 "full_report":      None,
                 "cpu":              pb.detect_cpu_name(),
+                "run_tag":          cfg.get("run_tag", ""),
                 "cooldown_samples": cooldown_samples,
                 "cooldown_stats":   pb.summarize_cooldown(cooldown_samples),
                 "ambient_c":        cfg.get("ambient_c", 22),
@@ -661,7 +664,8 @@ class BenchmarkThread(QThread):
                     fan_text=report["fan_text"],
                     sensor_source="LibreHardwareMonitor" if active else "none",
                     cooldown_stats=report.get("cooldown_stats"),
-                    ambient_c=report.get("ambient_c"))
+                    ambient_c=report.get("ambient_c"),
+                    run_tag=report.get("run_tag") or None)
             except Exception:
                 pass
 
@@ -1088,9 +1092,11 @@ class CompareTab(QWidget):
             prev = combo.currentIndex()
             combo.clear()
             for r in self._runs:
-                ts  = (r.get("timestamp","")[:16]).replace("T"," ")
-                cpu = (r.get("cpu") or "")[:28]
-                combo.addItem(f"{ts}  {cpu}")
+                ts  = (r.get("timestamp", "")[:16]).replace("T", " ")
+                cpu = (r.get("cpu") or "")[:22]
+                tag = r.get("run_tag") or ""
+                label = f"{ts}  {cpu}  [{tag}]" if tag else f"{ts}  {cpu}"
+                combo.addItem(label)
             if prev >= 0 and prev < combo.count():
                 combo.setCurrentIndex(prev)
             elif len(self._runs) >= 2:
@@ -1170,8 +1176,9 @@ class HistoryTab(QWidget):
     run_selected = pyqtSignal(dict)
 
     _COLS = [
-        ("Date",           130),
-        ("CPU",            185),
+        ("Date",           120),
+        ("CPU",            170),
+        ("Tag",            130),
         ("Single (d/s)",   100),
         ("Multi (d/s)",    100),
         ("Peak °C",         70),
@@ -1254,24 +1261,29 @@ class HistoryTab(QWidget):
             row = self._table.rowCount()
             self._table.insertRow(row)
 
-            # Text columns (col 0: date, col 1: cpu)
+            tag  = r.get("run_tag") or ""
+
+            # Text columns: 0=date, 1=cpu, 2=tag
             ts_item = QTableWidgetItem(ts)
             ts_item.setData(Qt.ItemDataRole.UserRole + 1, r)   # stash run dict
             self._table.setItem(row, 0, ts_item)
             self._table.setItem(row, 1, QTableWidgetItem(cpu))
+            tag_item = QTableWidgetItem(tag)
+            tag_item.setForeground(QColor(ACCENT if tag else SUBTLE))
+            self._table.setItem(row, 2, tag_item)
 
             # Numeric columns
             def _ni(v, fmt):
                 s = fmt.format(v) if v is not None else "—"
                 return _NumItem(s, float(v) if v is not None else None)
 
-            self._table.setItem(row, 2, _ni(s_t,  "{:,.0f}"))
-            self._table.setItem(row, 3, _ni(m_t,  "{:,.0f}"))
-            self._table.setItem(row, 4, _ni(p_c,  "{:.1f}"))
-            self._table.setItem(row, 5, _ni(a_w,  "{:.1f}"))
-            self._table.setItem(row, 6, _ni(rth,  "{:.3f}"))
-            self._table.setItem(row, 7, _ni(cv,   "{:.1f}"))
-            self._table.setItem(row, 8, _ni(cds,  "{:.0f}"))
+            self._table.setItem(row, 3, _ni(s_t,  "{:,.0f}"))
+            self._table.setItem(row, 4, _ni(m_t,  "{:,.0f}"))
+            self._table.setItem(row, 5, _ni(p_c,  "{:.1f}"))
+            self._table.setItem(row, 6, _ni(a_w,  "{:.1f}"))
+            self._table.setItem(row, 7, _ni(rth,  "{:.3f}"))
+            self._table.setItem(row, 8, _ni(cv,   "{:.1f}"))
+            self._table.setItem(row, 9, _ni(cds,  "{:.0f}"))
 
         self._table.setSortingEnabled(True)
 
@@ -1313,6 +1325,34 @@ class SettingsPanel(QWidget):
         bl.addWidget(self.ambient_c)
         root.addWidget(bench)
 
+        tag_grp = QGroupBox("Run Tag")
+        tl = QVBoxLayout(tag_grp)
+        tag_hint = QLabel(
+            "Label this run for easy comparison\n"
+            "(cooler swap, RAM OC, new paste, etc.)")
+        tag_hint.setStyleSheet(f"color:{SUBTLE};font-size:8pt;")
+        tl.addWidget(tag_hint)
+        self.run_tag = QLineEdit()
+        self.run_tag.setPlaceholderText("e.g. 32GB DDR5-6000, Noctua NH-D15…")
+        self.run_tag.setMaxLength(60)
+        tl.addWidget(self.run_tag)
+        tag_btn_row = QHBoxLayout(); tag_btn_row.setSpacing(4)
+        self._detect_btn = QPushButton("Auto-detect")
+        self._detect_btn.setToolTip("Detect RAM spec from system")
+        self._detect_btn.clicked.connect(self._run_autodetect)
+        tag_btn_row.addWidget(self._detect_btn)
+        clear_tag_btn = QPushButton("Clear")
+        clear_tag_btn.clicked.connect(self.run_tag.clear)
+        tag_btn_row.addWidget(clear_tag_btn)
+        tl.addLayout(tag_btn_row)
+        self._tag_status = QLabel("detecting…")
+        self._tag_status.setStyleSheet(f"color:{SUBTLE};font-size:8pt;")
+        tl.addWidget(self._tag_status)
+        root.addWidget(tag_grp)
+
+        # Kick off auto-detect in background after the UI is shown
+        QTimer.singleShot(200, self._run_autodetect)
+
         nas = QGroupBox("Archive to NAS")
         nl  = QVBoxLayout(nas)
         self.archive_chk = QCheckBox("Upload report after run")
@@ -1338,6 +1378,30 @@ class SettingsPanel(QWidget):
         self._try_load_keyring()
         root.addWidget(nas)
         root.addStretch()
+
+    def _run_autodetect(self):
+        """Detect RAM spec in a background thread so the UI never blocks."""
+        import threading
+        self._tag_status.setText("detecting…")
+        self._tag_status.setStyleSheet(f"color:{SUBTLE};font-size:8pt;")
+        self._detect_btn.setEnabled(False)
+
+        def _worker():
+            spec = pb.detect_ram_spec()
+            QTimer.singleShot(0, lambda: self._on_autodetect(spec))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_autodetect(self, spec):
+        self._detect_btn.setEnabled(True)
+        if spec:
+            if not self.run_tag.text().strip():
+                self.run_tag.setText(spec)
+            self._tag_status.setText(f"detected: {spec}")
+            self._tag_status.setStyleSheet("color:#a6e3a1;font-size:8pt;")
+        else:
+            self._tag_status.setText("auto-detect unavailable — enter manually")
+            self._tag_status.setStyleSheet(f"color:{SUBTLE};font-size:8pt;")
 
     def _try_load_keyring(self):
         user = self.sftp_user.text().strip() or pb.DEFAULT_SFTP_USER
@@ -1388,6 +1452,7 @@ class SettingsPanel(QWidget):
             "smb_share":     f"//{nas}/Common-Room",
             "sftp_user":     user,
             "ambient_c":     self.ambient_c.value(),
+            "run_tag":       self.run_tag.text().strip(),
         }
 
 

@@ -1184,6 +1184,71 @@ def detect_cpu_name():
     return name
 
 
+def detect_ram_spec():
+    """Return a short RAM description string like '32GB DDR5-6000', or None.
+
+    Windows: queries Win32_PhysicalMemory via PowerShell (fast, ~0.5s).
+    Linux:   reads /proc/meminfo for total; tries sudo -n dmidecode for speed.
+
+    Returns None on any failure — callers should treat the result as optional.
+    SMBIOSMemoryType codes: 24=DDR3, 26=DDR4, 34=DDR5, 0=unknown.
+    """
+    if platform.system() == "Windows":
+        try:
+            out = subprocess.check_output(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                 "-Command",
+                 "Get-CimInstance Win32_PhysicalMemory | "
+                 "Select-Object Capacity,Speed,SMBIOSMemoryType | "
+                 "ConvertTo-Json -Compress"],
+                timeout=10, stderr=subprocess.DEVNULL)
+            modules = json.loads(out.decode("utf-8", errors="replace").strip())
+            if isinstance(modules, dict):
+                modules = [modules]
+            if not modules:
+                return None
+            total_bytes = sum(int(m.get("Capacity") or 0) for m in modules)
+            total_gb    = total_bytes // (1024 ** 3)
+            if total_gb <= 0:
+                return None
+            speed       = max((int(m.get("Speed") or 0) for m in modules), default=0)
+            type_map    = {24: "DDR3", 26: "DDR4", 34: "DDR5"}
+            mem_type    = type_map.get(int(modules[0].get("SMBIOSMemoryType") or 0), "DDR")
+            return "{}GB {}-{}".format(total_gb, mem_type, speed) if speed > 0 \
+                   else "{}GB {}".format(total_gb, mem_type)
+        except Exception:
+            return None
+
+    elif platform.system() == "Linux":
+        total_gb = None
+        speed    = None
+        try:
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    if line.startswith("MemTotal:"):
+                        total_gb = round(int(line.split()[1]) / 1024 / 1024)
+                        break
+        except Exception:
+            pass
+        try:
+            out = subprocess.check_output(
+                ["sudo", "-n", "dmidecode", "-t", "memory"],
+                stderr=subprocess.DEVNULL, timeout=5)
+            for line in out.decode("utf-8", errors="replace").splitlines():
+                ls = line.strip()
+                if ls.startswith("Speed:") and "MT/s" in ls:
+                    m = re.search(r"(\d+)\s*MT/s", ls)
+                    if m:
+                        speed = int(m.group(1))
+                        break
+        except Exception:
+            pass
+        if total_gb:
+            return "{}GB DDR-{}".format(total_gb, speed) if speed \
+                   else "{}GB RAM".format(total_gb)
+    return None
+
+
 def start_turbostat(out_path):
     if shutil.which("turbostat") is None:
         print("[archive] turbostat not found; skipping capture", flush=True)
@@ -2266,7 +2331,12 @@ def archive_setup(args):
                       "pass --sftp-password or seed the keyring interactively", flush=True)
                 password = None
         ts = datetime.datetime.now().strftime("%m-%d-%Y %H-%M-%S")
-        log_filename = "{} {}.log".format(cpu, ts)
+        tag = getattr(args, "run_tag", "") or ""
+        tag_safe = re.sub(r'[/\\:*?"<>|]', "_", tag).strip()[:40]
+        if tag_safe:
+            log_filename = "{} [{}] {}.log".format(cpu, tag_safe, ts)
+        else:
+            log_filename = "{} {}.log".format(cpu, ts)
         cpu_subdir = "{}/{}".format(args.sftp_path.rstrip("/"), cpu)
         run_n = ts
     else:
@@ -2310,7 +2380,12 @@ def archive_setup(args):
             print("[archive] {} existing run(s) for today -> this run is #{}".format(
                 len(matching), run_n), flush=True)
             smb_mkdir(args.smb_share, user, password, cpu_subdir)
-        log_filename = "{}{}.log".format(prefix, run_n)
+        tag = getattr(args, "run_tag", "") or ""
+        tag_safe = re.sub(r'[/\\:*?"<>|]', "_", tag).strip()[:40]
+        if tag_safe:
+            log_filename = "{}{} [{}].log".format(prefix, run_n, tag_safe)
+        else:
+            log_filename = "{}{}.log".format(prefix, run_n)
 
     raw_path = os.path.join(tempfile.gettempdir(), "_turbostat_raw_{}.tmp".format(os.getpid()))
     print("[archive] log filename: {}".format(log_filename), flush=True)
@@ -2375,7 +2450,7 @@ def format_cooldown_section(cooldown_stats, ambient_c=None):
 
 def build_combined_report(cpu_name, run_n, args, bench_output, turbo_summary_text,
                           cooling_text=None, fan_text=None, sensor_source="turbostat",
-                          cooldown_stats=None, ambient_c=None):
+                          cooldown_stats=None, ambient_c=None, run_tag=None):
     sep = "=" * 64
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     info = system_info()
@@ -2386,6 +2461,10 @@ def build_combined_report(cpu_name, run_n, args, bench_output, turbo_summary_tex
         "Date:           {}".format(now),
         "CPU:            {}".format(cpu_name),
         "Run #:          {}".format(run_n),
+    ]
+    if run_tag:
+        parts.append("Tag:            {}".format(run_tag))
+    parts += [
         "Platform:       {}".format(info["platform"]),
         "Logical CPUs:   {}".format(info["logical_cpus"]),
         "Python:         {}".format(info["python"]),
