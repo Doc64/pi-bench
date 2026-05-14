@@ -66,6 +66,51 @@ import threading
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
+# ── Version & auto-update ─────────────────────────────────────────────────────
+APP_VERSION = "1.0.0"
+
+# Set to "owner/repo" of the GitHub project that hosts releases.
+# The update checker looks for the latest release asset named *.exe.
+# Leave empty to disable update checks.
+_UPDATE_GITHUB_REPO = "Doc64/pi-bench"
+
+
+def check_for_update() -> "tuple[str, str] | tuple[None, None]":
+    """Check GitHub releases for a newer version.
+
+    Returns (version_str, download_url) if an update is available, or
+    (None, None) if already up-to-date, no repo configured, or any error.
+    Safe to call from a background thread.
+    """
+    if not _UPDATE_GITHUB_REPO:
+        return None, None
+    try:
+        import urllib.request as _req
+        url = f"https://api.github.com/repos/{_UPDATE_GITHUB_REPO}/releases/latest"
+        rq  = _req.Request(url, headers={
+            "User-Agent": f"pi-bench/{APP_VERSION}",
+            "Accept": "application/vnd.github+json",
+        })
+        with _req.urlopen(rq, timeout=8) as resp:
+            data = json.loads(resp.read())
+        tag = data.get("tag_name", "").lstrip("v")
+        if not tag or not _version_gt(tag, APP_VERSION):
+            return None, None
+        for asset in data.get("assets", []):
+            if asset.get("name", "").lower().endswith(".exe"):
+                return tag, asset["browser_download_url"]
+        return None, None
+    except Exception:
+        return None, None
+
+
+def _version_gt(a: str, b: str) -> bool:
+    """Return True if semver string *a* is strictly greater than *b*."""
+    def _parts(v):
+        try:    return tuple(int(x) for x in v.split("."))
+        except: return (0,)
+    return _parts(a) > _parts(b)
+
 
 def _raise_int_str_limit(digits):
     if hasattr(sys, "set_int_max_str_digits"):

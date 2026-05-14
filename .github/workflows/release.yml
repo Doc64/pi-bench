@@ -1,0 +1,48 @@
+name: Release
+
+# Triggers on any tag that looks like v1.2.3
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      # ── 1. Check out the code ──────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. Extract version from pi_bench.py ───────────────────────────
+      - name: Extract version
+        id: ver
+        shell: pwsh
+        run: |
+          $line  = Select-String '^APP_VERSION\s*=\s*"(.+)"' pi_bench.py
+          $ver   = $line.Matches[0].Groups[1].Value
+          if (-not $ver) { Write-Error "APP_VERSION not found in pi_bench.py"; exit 1 }
+          echo "VERSION=$ver" >> $env:GITHUB_OUTPUT
+          Write-Host "Building version: $ver"
+
+      # ── 3. Install Inno Setup via Chocolatey ──────────────────────────
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      # ── 4. Build the installer ────────────────────────────────────────
+      - name: Build installer
+        shell: cmd
+        env:
+          CI_APP_VERSION: ${{ steps.ver.outputs.VERSION }}
+        run: build_installer.bat
+
+      # ── 5. Create GitHub release and upload installer ─────────────────
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Pi Bench ${{ steps.ver.outputs.VERSION }}"
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: dist/PiBenchSetup-${{ steps.ver.outputs.VERSION }}.exe
