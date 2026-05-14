@@ -16,10 +16,11 @@ import multiprocessing as mp, os, platform, signal, subprocess, sys, tempfile, t
 from PyQt6.QtCore  import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui   import QColor, QFont, QPalette
 from PyQt6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QFrame, QGroupBox,
+    QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+    QFrame, QGroupBox,
     QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-    QMainWindow, QProgressBar, QPushButton, QScrollArea, QSpinBox,
-    QSplitter, QStackedWidget, QTabWidget, QTableWidget,
+    QMainWindow, QMessageBox, QProgressBar, QPushButton, QScrollArea,
+    QSpinBox, QSplitter, QStackedWidget, QTabWidget, QTableWidget,
     QTableWidgetItem, QTextEdit, QVBoxLayout, QWidget,
 )
 import pyqtgraph as pg
@@ -155,6 +156,78 @@ for _sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(_sig, _signal_handler)
     except (OSError, ValueError):
         pass   # not all signals are available on every platform
+
+
+def _prompt_sudo_for_turbostat(parent) -> bool:
+    """Prime sudo so turbostat can run, prompting the user if the cache is empty.
+
+    Checks first with `sudo -n true` (no password attempt).  If the cache is
+    already warm the dialog never appears.  The password is piped directly to
+    `sudo -S true` — a no-op command — and discarded immediately afterwards.
+    Pi Bench never stores or logs it.  sudo's own credential cache expires
+    automatically (5–15 min depending on /etc/sudoers); we never permanently
+    hold elevated access.
+
+    Returns True if sudo is ready, False if the user skipped or auth failed.
+    """
+    if subprocess.run(["sudo", "-n", "true"], capture_output=True).returncode == 0:
+        return True  # already cached — nothing to do
+
+    dlg = QDialog(parent)
+    dlg.setWindowTitle("Sensor Access Required")
+    dlg.setMinimumWidth(460)
+    lay = QVBoxLayout(dlg)
+    lay.setSpacing(10)
+    lay.setContentsMargins(16, 16, 16, 16)
+
+    info = QLabel(
+        "<b>Pi Bench uses <tt>turbostat</tt> to capture CPU temperatures, "
+        "clock speeds, and power consumption during the benchmark.</b><br><br>"
+        "<tt>turbostat</tt> requires a one-time <tt>sudo</tt> authorisation on Linux. "
+        "Your password is passed directly to <tt>sudo</tt> and is "
+        "<b>never stored or logged</b> by Pi Bench. "
+        "The <tt>sudo</tt> credential cache then expires on its own "
+        "(typically 5–15 minutes, set by your system's <tt>/etc/sudoers</tt>). "
+        "Pi Bench does <b>not</b> permanently hold elevated access.<br><br>"
+        "Click <b>Skip</b> to run the benchmark without sensor capture."
+    )
+    info.setWordWrap(True)
+    lay.addWidget(info)
+
+    pw_field = QLineEdit()
+    pw_field.setEchoMode(QLineEdit.EchoMode.Password)
+    pw_field.setPlaceholderText("System (sudo) password")
+    lay.addWidget(pw_field)
+
+    btns = QDialogButtonBox(
+        QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+    )
+    btns.button(QDialogButtonBox.StandardButton.Cancel).setText("Skip")
+    lay.addWidget(btns)
+    btns.accepted.connect(dlg.accept)
+    btns.rejected.connect(dlg.reject)
+    pw_field.returnPressed.connect(dlg.accept)
+
+    if dlg.exec() != QDialog.DialogCode.Accepted:
+        return False
+
+    password = pw_field.text()
+    if not password:
+        return False
+
+    result = subprocess.run(
+        ["sudo", "-S", "true"],
+        input=password + "\n",
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        QMessageBox.warning(
+            parent, "Incorrect Password",
+            "sudo authentication failed — the benchmark will run without sensor capture.\n\n"
+            "You can try again on the next run.",
+        )
+        return False
+    return True
 
 
 def _apply_dark_palette(app: QApplication):
@@ -2538,6 +2611,8 @@ class MainWindow(QMainWindow):
     def _start(self):
         if self._thread and self._thread.isRunning():
             return
+        if platform.system() == "Linux":
+            _prompt_sudo_for_turbostat(self)
         self.chart.reset(); self.stat_bar.clear(); self.log.clear()
         self._tabs.setCurrentIndex(0)
         self.run_btn.setEnabled(False)
