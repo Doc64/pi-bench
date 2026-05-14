@@ -1304,12 +1304,13 @@ class SettingsPanel(QWidget):
     # QTimer.singleShot from a worker thread is unreliable (no event loop);
     # signals are the correct Qt mechanism for thread → main-thread callbacks.
     _autodetect_result = pyqtSignal(object)   # str | None
+    # Emitted whenever any setting value changes so the sidebar summary can refresh.
+    settings_changed   = pyqtSignal()
 
     def __init__(self):
         super().__init__()
-        self.setFixedWidth(230)
         root = QVBoxLayout(self)
-        root.setContentsMargins(0,0,0,0); root.setSpacing(10)
+        root.setContentsMargins(12,12,12,12); root.setSpacing(12)
 
         bench = QGroupBox("Benchmark")
         bl    = QVBoxLayout(bench)
@@ -1360,10 +1361,18 @@ class SettingsPanel(QWidget):
         # Kick off auto-detect in background after the UI is shown
         QTimer.singleShot(200, self._run_autodetect)
 
+        # Notify listeners (e.g. sidebar summary) when any setting changes
+        self.digits.valueChanged.connect(self.settings_changed)
+        self.workers.valueChanged.connect(self.settings_changed)
+        self.mode.currentIndexChanged.connect(self.settings_changed)
+        self.ambient_c.valueChanged.connect(self.settings_changed)
+        self.run_tag.textChanged.connect(self.settings_changed)
+
         nas = QGroupBox("Archive to NAS")
         nl  = QVBoxLayout(nas)
         self.archive_chk = QCheckBox("Upload report after run")
         self.archive_chk.setChecked(True); nl.addWidget(self.archive_chk)
+        self.archive_chk.stateChanged.connect(self.settings_changed)
         nl.addWidget(QLabel("NAS IP:"))
         self.nas_ip = QLineEdit("192.168.200.36"); nl.addWidget(self.nas_ip)
         nl.addWidget(QLabel("SFTP user:"))
@@ -1487,26 +1496,39 @@ class MainWindow(QMainWindow):
         root = QHBoxLayout(central)
         root.setContentsMargins(10,10,10,10); root.setSpacing(10)
 
-        # ── Left sidebar ─────────────────────────────────────────────────
+        # ── Left sidebar (slim: system info + config summary + run button) ──
         left = QVBoxLayout()
-        self.settings = SettingsPanel()
-        left.addWidget(self.settings)
+        left.setContentsMargins(0, 0, 0, 0); left.setSpacing(8)
 
-        for _ in range(2):
-            sep = QFrame(); sep.setFrameShape(QFrame.Shape.HLine)
-            sep.setStyleSheet(f"color:{SUBTLE};"); left.addWidget(sep)
-            if _ == 0:
-                info = QGroupBox("System")
-                il   = QVBoxLayout(info); il.setSpacing(2)
-                si   = pb.system_info(); cpu = pb.detect_cpu_name()
-                for lbl, val in [("CPU",cpu),("Cores",str(si["logical_cpus"])),
-                                  ("Python",si["python"])]:
-                    row = QHBoxLayout()
-                    lb = QLabel(lbl); lb.setStyleSheet(f"color:{SUBTLE};font-size:8pt;"); lb.setFixedWidth(46)
-                    vl = QLabel(val); vl.setStyleSheet(f"color:{TEXT};font-size:8pt;"); vl.setWordWrap(True)
-                    row.addWidget(lb); row.addWidget(vl,1)
-                    il.addLayout(row)
-                left.addWidget(info)
+        # System info group
+        info = QGroupBox("System")
+        il   = QVBoxLayout(info); il.setSpacing(2)
+        si   = pb.system_info(); cpu = pb.detect_cpu_name()
+        for lbl, val in [("CPU", cpu), ("Cores", str(si["logical_cpus"])),
+                          ("Python", si["python"])]:
+            row = QHBoxLayout()
+            lb = QLabel(lbl); lb.setStyleSheet(f"color:{SUBTLE};font-size:8pt;"); lb.setFixedWidth(46)
+            vl = QLabel(val); vl.setStyleSheet(f"color:{TEXT};font-size:8pt;"); vl.setWordWrap(True)
+            row.addWidget(lb); row.addWidget(vl, 1)
+            il.addLayout(row)
+        left.addWidget(info)
+
+        # Compact run-config summary — auto-updates when settings change
+        cfg_grp = QGroupBox("Run Config")
+        cl = QVBoxLayout(cfg_grp); cl.setContentsMargins(6, 4, 6, 6)
+        self._cfg_summary = QLabel("—")
+        self._cfg_summary.setStyleSheet(f"color:{TEXT};font-size:8pt;")
+        self._cfg_summary.setWordWrap(True)
+        open_btn = QPushButton("Edit settings…")
+        open_btn.setStyleSheet(f"font-size:8pt; padding:2px 6px;")
+        open_btn.clicked.connect(lambda: self._tabs.setCurrentIndex(
+            next(i for i in range(self._tabs.count())
+                 if "Settings" in self._tabs.tabText(i))))
+        cl.addWidget(self._cfg_summary)
+        cl.addWidget(open_btn)
+        left.addWidget(cfg_grp)
+
+        left.addStretch()
 
         self.run_btn = QPushButton("▶  Run Benchmark")
         self.run_btn.setMinimumHeight(46)
@@ -1522,6 +1544,7 @@ class MainWindow(QMainWindow):
         self.status_lbl.setStyleSheet(f"color:{SUBTLE};font-size:9pt;")
         left.addWidget(self.status_lbl)
         left_w = QWidget(); left_w.setLayout(left)
+        left_w.setFixedWidth(180)
 
         # ── Right: tab widget ────────────────────────────────────────────
         self._tabs = QTabWidget()
@@ -1558,8 +1581,39 @@ class MainWindow(QMainWindow):
         self._history_tab.run_selected.connect(self._on_history_run_selected)
         self._tabs.addTab(self._history_tab, "History")
 
+        # Tab 5 — Settings (SettingsPanel in a scroll area)
+        self.settings = SettingsPanel()
+        self.settings.settings_changed.connect(self._refresh_config_summary)
+        # Populate summary once autodetect fires (give the worker time to finish)
+        QTimer.singleShot(600, self._refresh_config_summary)
+        _settings_scroll = QScrollArea()
+        _settings_scroll.setWidgetResizable(True)
+        _settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        _settings_scroll.setStyleSheet("QScrollArea{border:none;}")
+        _settings_scroll.setWidget(self.settings)
+        self._tabs.addTab(_settings_scroll, "⚙  Settings")
+
         root.addWidget(left_w)
         root.addWidget(self._tabs, 1)
+
+    # ------------------------------------------------------------------
+    def _refresh_config_summary(self):
+        """Update the compact run-config summary label on the left sidebar."""
+        s = self.settings
+        digits_m = s.digits.value()
+        mode     = s.mode.currentText()
+        workers  = s.workers.value()
+        ambient  = s.ambient_c.value()
+        tag      = s.run_tag.text().strip()
+        archive  = s.archive_chk.isChecked()
+        lines = [
+            f"{digits_m}M digits · {mode}",
+            f"{workers} workers · {ambient}°C",
+        ]
+        if tag:
+            lines.append(f"Tag: {tag}")
+        lines.append(f"Archive: {'on' if archive else 'off'}")
+        self._cfg_summary.setText("\n".join(lines))
 
     # ------------------------------------------------------------------
     def closeEvent(self, event):
