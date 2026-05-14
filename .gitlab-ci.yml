@@ -1,13 +1,102 @@
-build-installer:
+# ─────────────────────────────────────────────────────────────────────────────
+#  Pi Bench — GitLab CI/CD
+#
+#  Jobs:
+#    build   — every push to main: build the installer (smoke-test the build)
+#    release — every v* tag      : build, publish a GitLab release, attach .exe
+#
+#  To release a new version:
+#    1. Bump APP_VERSION in pi_bench.py  (e.g. "1.0.1")
+#    2. git add pi_bench.py && git commit -m "bump version to 1.0.1"
+#    3. git tag v1.0.1
+#    4. git push && git push --tags
+#
+#  The release job creates the GitLab release automatically and attaches
+#  PiBenchSetup-<version>.exe as a downloadable asset.
+#
+#  In-app update check (pi_bench.py::check_for_update) fetches the latest
+#  release via the GitHub API if _UPDATE_GITHUB_REPO is set, or the GitLab
+#  Releases API if the repo is on GitLab.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Use a Windows shell runner — required for Inno Setup
+default:
   tags:
-    - windows
-  before_script:
-    - echo "Starting build"
+    - windows          # adjust to match your runner's tag
+
+stages:
+  - build
+  - release
+
+# ── Shared: extract version from pi_bench.py ─────────────────────────────────
+.version_script: &version_script
+  - |
+    $ver = (Select-String '^APP_VERSION\s*=\s*"(.+)"' pi_bench.py).Matches[0].Groups[1].Value
+    if (-not $ver) { Write-Error "Could not read APP_VERSION"; exit 1 }
+    $env:CI_APP_VERSION = $ver
+    Write-Host "Version: $ver"
+
+# ── build job — runs on every push to main ───────────────────────────────────
+build:
+  stage: build
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/'
   script:
-    - '& "C:\Users\tom\AppData\Local\Programs\Inno Setup 7\ISCC.exe" pi_bench_setup.iss'
+    - *version_script
+    - .\build_installer.bat
   artifacts:
+    name: "PiBench-$env:CI_APP_VERSION-$env:CI_COMMIT_SHORT_SHA"
     paths:
-      - dist/PiBenchSetup.exe
-    expire_in: 30 days
-  only:
-    - main
+      - dist/PiBenchSetup-*.exe
+    expire_in: 7 days
+
+# ── release job — runs only on v* tags ───────────────────────────────────────
+release:
+  stage: release
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/'
+  script:
+    - *version_script
+    - .\build_installer.bat
+    # Upload the installer as a release asset via GitLab API
+    - |
+      $version  = $env:CI_APP_VERSION
+      $tag      = $env:CI_COMMIT_TAG
+      $exe      = "dist\PiBenchSetup-$version.exe"
+      $headers  = @{ "PRIVATE-TOKEN" = $env:GITLAB_TOKEN }
+      $project  = [uri]::EscapeDataString($env:CI_PROJECT_PATH)
+
+      # 1. Upload file to the package registry (generic packages)
+      $upload_url = "$env:CI_SERVER_URL/api/v4/projects/$($env:CI_PROJECT_ID)/packages/generic/pi-bench/$version/PiBenchSetup-$version.exe"
+      Invoke-RestMethod -Method Put -Uri $upload_url `
+        -Headers $headers `
+        -InFile $exe `
+        -ContentType "application/octet-stream"
+
+      # 2. Create the release
+      $asset_url = "$env:CI_SERVER_URL/$env:CI_PROJECT_PATH/-/packages/generic/pi-bench/$version/PiBenchSetup-$version.exe"
+      $body = @{
+        name        = "Pi Bench $version"
+        tag_name    = $tag
+        description = "## Pi Bench $version`n`nSee [CHANGELOG](CHANGELOG.md) for details."
+        assets      = @{
+          links = @(
+            @{
+              name     = "PiBenchSetup-$version.exe"
+              url      = $asset_url
+              link_type = "package"
+            }
+          )
+        }
+      } | ConvertTo-Json -Depth 5
+      Invoke-RestMethod -Method Post `
+        -Uri "$env:CI_SERVER_URL/api/v4/projects/$($env:CI_PROJECT_ID)/releases" `
+        -Headers ($headers + @{ "Content-Type" = "application/json" }) `
+        -Body $body
+      Write-Host "Release $version published."
+  artifacts:
+    name: "PiBench-$env:CI_APP_VERSION-release"
+    paths:
+      - dist/PiBenchSetup-*.exe
+    expire_in: 90 days

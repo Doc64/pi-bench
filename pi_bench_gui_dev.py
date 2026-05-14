@@ -15,7 +15,7 @@ Three-copy strategy:
 """
 
 import argparse, atexit, datetime, importlib, io, json
-import multiprocessing as mp, os, platform, signal, subprocess, sys
+import multiprocessing as mp, os, platform, signal, subprocess, sys, tempfile
 
 from PyQt6.QtCore  import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui   import QColor, QFont, QPalette
@@ -1296,6 +1296,67 @@ class HistoryTab(QWidget):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+#  UPDATE BAR
+# ═══════════════════════════════════════════════════════════════════════════
+
+class UpdateBar(QWidget):
+    """Full-width notification strip shown when a newer version is available."""
+    update_clicked = pyqtSignal(str, str)   # version, download_url
+
+    def __init__(self):
+        super().__init__()
+        self.hide()
+        self.setFixedHeight(36)
+        self.setStyleSheet(
+            f"background:#313244; border-bottom:1px solid {ACCENT};")
+        row = QHBoxLayout(self)
+        row.setContentsMargins(14, 0, 8, 0); row.setSpacing(10)
+
+        ico = QLabel("⬆")
+        ico.setStyleSheet(f"color:{ACCENT};font-size:12pt;")
+        row.addWidget(ico)
+
+        self._lbl = QLabel()
+        self._lbl.setStyleSheet(f"color:{TEXT};font-size:9pt;")
+        row.addWidget(self._lbl, 1)
+
+        self._dl_btn = QPushButton("Download & Install")
+        self._dl_btn.setStyleSheet(
+            f"QPushButton{{background:{ACCENT};color:#000;font-weight:bold;"
+            f"border-radius:4px;padding:2px 12px;font-size:9pt;}}"
+            f"QPushButton:hover{{background:#b4befe;}}"
+            f"QPushButton:disabled{{background:{SUBTLE};color:#888;}}")
+        self._dl_btn.clicked.connect(self._on_install)
+        row.addWidget(self._dl_btn)
+
+        dismiss = QPushButton("✕")
+        dismiss.setFixedWidth(26)
+        dismiss.setStyleSheet(
+            f"color:{SUBTLE};background:transparent;border:none;font-size:10pt;")
+        dismiss.clicked.connect(self.hide)
+        row.addWidget(dismiss)
+
+        self._version = ""
+        self._url     = ""
+
+    def notify(self, version: str, url: str):
+        self._version = version
+        self._url     = url
+        self._lbl.setText(
+            f"Pi Bench {version} is available  —  "
+            f"current version: {pb.APP_VERSION}")
+        self._dl_btn.setEnabled(True)
+        self.show()
+
+    def set_downloading(self):
+        self._dl_btn.setEnabled(False)
+        self._lbl.setText(f"Downloading Pi Bench {self._version}…")
+
+    def _on_install(self):
+        self.update_clicked.emit(self._version, self._url)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 #  SETTINGS PANEL
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -1482,18 +1543,40 @@ class SettingsPanel(QWidget):
 # ═══════════════════════════════════════════════════════════════════════════
 
 class MainWindow(QMainWindow):
+    # Thread → main-thread signals for the update checker
+    _update_available = pyqtSignal(str, str)   # version, download_url
+    _update_failed    = pyqtSignal(str)         # error message
+
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Pi Bench  [dev]")
+        self.setWindowTitle(f"Pi Bench  [dev]  v{pb.APP_VERSION}")
         self.setMinimumSize(1200, 760)
         self._thread: BenchmarkThread | None = None
         self._history = RunHistory()
         self._build_ui()
 
+        # Wire update signals (bar is created inside _build_ui)
+        self._update_available.connect(self._update_bar.notify)
+        self._update_failed.connect(
+            lambda msg: self.status_lbl.setText(f"Update check failed: {msg}"))
+
+        # Check for updates 4 seconds after launch (non-blocking background thread)
+        QTimer.singleShot(4000, self._check_for_update)
+
     def _build_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
-        root = QHBoxLayout(central)
+
+        # Outer vertical layout: update bar (hidden by default) + main content
+        outer = QVBoxLayout(central)
+        outer.setContentsMargins(0, 0, 0, 0); outer.setSpacing(0)
+        self._update_bar = UpdateBar()
+        self._update_bar.update_clicked.connect(self._do_update)
+        outer.addWidget(self._update_bar)
+
+        inner = QWidget()
+        outer.addWidget(inner, 1)
+        root = QHBoxLayout(inner)
         root.setContentsMargins(10,10,10,10); root.setSpacing(10)
 
         # ── Left sidebar (slim: system info + config summary + run button) ──
@@ -1614,6 +1697,46 @@ class MainWindow(QMainWindow):
             lines.append(f"Tag: {tag}")
         lines.append(f"Archive: {'on' if archive else 'off'}")
         self._cfg_summary.setText("\n".join(lines))
+
+    # ------------------------------------------------------------------
+    def _check_for_update(self):
+        """Spawn a background thread to query GitHub for a newer release."""
+        import threading
+        def _worker():
+            try:
+                version, url = pb.check_for_update()
+                if version:
+                    self._update_available.emit(version, url)
+            except Exception as exc:
+                self._update_failed.emit(str(exc))
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _do_update(self, version: str, url: str):
+        """Download the installer and run it silently, then quit."""
+        import threading, urllib.request
+        self._update_bar.set_downloading()
+        self.run_btn.setEnabled(False)
+        self.status_lbl.setText(f"Downloading Pi Bench {version}…")
+
+        def _worker():
+            try:
+                tmp_dir = tempfile.mkdtemp(prefix="pibench_update_")
+                installer = os.path.join(tmp_dir, f"PiBenchSetup_{version}.exe")
+                urllib.request.urlretrieve(url, installer)
+                # /SILENT   — shows progress window but no wizard pages
+                # /NORESTART — never auto-reboot
+                # /CLOSEAPPLICATIONS — asks running instances to close gracefully
+                subprocess.Popen(
+                    [installer, "/SILENT", "/NORESTART", "/CLOSEAPPLICATIONS"],
+                    creationflags=subprocess.DETACHED_PROCESS
+                    if hasattr(subprocess, "DETACHED_PROCESS") else 0,
+                )
+                QApplication.quit()
+            except Exception as exc:
+                self._update_failed.emit(str(exc))
+                self.run_btn.setEnabled(True)
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     # ------------------------------------------------------------------
     def closeEvent(self, event):

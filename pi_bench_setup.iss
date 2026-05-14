@@ -18,7 +18,11 @@
 ; ─────────────────────────────────────────────────────────────────────────────
 
 #define AppName    "Pi Bench"
-#define AppVersion "1.0"
+; AppVersion is injected by build_installer.bat via /DAppVersion=x.y.z
+; Fall back to "1.0.0" only if built directly without the build script.
+#ifndef AppVersion
+  #define AppVersion "1.0.0"
+#endif
 #define AppId      "PiBench"
 #define SrcDir     "."
 
@@ -33,7 +37,7 @@ DefaultDirName={localappdata}\Programs\{#AppName}
 DefaultGroupName={#AppName}
 AllowNoIcons=yes
 OutputDir=dist
-OutputBaseFilename=PiBenchSetup
+OutputBaseFilename=PiBenchSetup-{#AppVersion}
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
