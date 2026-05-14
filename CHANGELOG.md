@@ -9,6 +9,22 @@ Versioning:
 
 ---
 
+## [2.2.0] — 2026-05-14
+
+### Added
+- **Linux auto-update via setup.sh** — the update checker now returns the
+  `setup.sh` release asset on Linux instead of the Windows `.exe`.  Clicking
+  "Download & Install" downloads `setup.sh`, marks it executable, and runs it
+  detached so it updates `~/.local/share/pi-bench/` in the background while
+  Pi Bench closes.  The next launch uses the new version automatically.
+
+### Fixed
+- **"Permission denied" crash on Linux update** — the previous flow
+  downloaded `PiBenchSetup-X.Y.Z.exe` and tried to execute it directly on
+  Linux, which the kernel rejects with `[Errno 13] Permission denied`.
+
+---
+
 ## [2.1.0] — 2026-05-14
 
 ### Added

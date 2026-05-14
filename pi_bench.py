@@ -67,7 +67,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # ── Version & auto-update ─────────────────────────────────────────────────────
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.2.0"
 
 # Set to "owner/repo" of the GitHub project that hosts releases.
 # The update checker looks for the latest release asset named *.exe.
@@ -80,7 +80,8 @@ def check_for_update() -> "tuple[str, str] | tuple[None, None]":
 
     Returns (version_str, download_url) if an update is available, or
     (None, None) if already up-to-date, no repo configured, or any error.
-    Safe to call from a background thread.
+    On Windows the download_url points to the *.exe installer; on Linux it
+    points to setup.sh.  Safe to call from a background thread.
     """
     if not _UPDATE_GITHUB_REPO:
         return None, None
@@ -96,8 +97,12 @@ def check_for_update() -> "tuple[str, str] | tuple[None, None]":
         tag = data.get("tag_name", "").lstrip("v")
         if not tag or not _version_gt(tag, APP_VERSION):
             return None, None
+        sysname = platform.system()
         for asset in data.get("assets", []):
-            if asset.get("name", "").lower().endswith(".exe"):
+            name = asset.get("name", "").lower()
+            if sysname == "Linux" and name == "setup.sh":
+                return tag, asset["browser_download_url"]
+            if sysname == "Windows" and name.endswith(".exe"):
                 return tag, asset["browser_download_url"]
         return None, None
     except Exception:

@@ -2563,7 +2563,7 @@ class MainWindow(QMainWindow):
         threading.Thread(target=_worker, daemon=True).start()
 
     def _do_update(self, version: str, url: str):
-        """Download the installer and run it silently, then quit."""
+        """Download the update and apply it silently, then quit."""
         import threading, urllib.request
         self._update_bar.set_downloading()
         self.run_btn.setEnabled(False)
@@ -2572,21 +2572,32 @@ class MainWindow(QMainWindow):
         def _worker():
             try:
                 tmp_dir = tempfile.mkdtemp(prefix="pibench_update_")
-                installer = os.path.join(tmp_dir, f"PiBenchSetup_{version}.exe")
-                urllib.request.urlretrieve(url, installer)
-
-                # Launch the installer as a fully detached process so it
-                # survives after this process exits.
-                # /SILENT    — progress window, no wizard pages
-                # /NORESTART — never auto-reboot
-                # Do NOT pass /CLOSEAPPLICATIONS — that tells Inno Setup to
-                # kill running instances itself, which deadlocks because this
-                # process is still alive waiting for the Popen to return.
-                # We close ourselves immediately below instead.
-                flags = 0
-                if hasattr(subprocess, "DETACHED_PROCESS"):
-                    flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-                subprocess.Popen([installer, "/SILENT", "/NORESTART"], creationflags=flags)
+                if url.endswith(".sh"):
+                    # Linux: download setup.sh and run it detached.
+                    # setup.sh updates ~/.local/share/pi-bench/ without sudo.
+                    setup_sh = os.path.join(tmp_dir, "setup.sh")
+                    urllib.request.urlretrieve(url, setup_sh)
+                    os.chmod(setup_sh, 0o755)
+                    subprocess.Popen(
+                        ["bash", setup_sh],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        start_new_session=True,
+                    )
+                else:
+                    # Windows: run Inno Setup installer silently.
+                    # /SILENT    — progress window, no wizard pages
+                    # /NORESTART — never auto-reboot
+                    # Do NOT pass /CLOSEAPPLICATIONS — that tells Inno Setup to
+                    # kill running instances itself, which deadlocks because this
+                    # process is still alive waiting for the Popen to return.
+                    # We close ourselves immediately below instead.
+                    installer = os.path.join(tmp_dir, f"PiBenchSetup_{version}.exe")
+                    urllib.request.urlretrieve(url, installer)
+                    flags = 0
+                    if hasattr(subprocess, "DETACHED_PROCESS"):
+                        flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+                    subprocess.Popen([installer, "/SILENT", "/NORESTART"], creationflags=flags)
 
                 # Quit must be scheduled on the main thread — calling
                 # QApplication.quit() directly from a worker thread is not
