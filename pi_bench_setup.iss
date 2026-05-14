@@ -68,6 +68,7 @@ Source: "{#SrcDir}\pi_bench.py";              DestDir: "{app}"; Flags: ignorever
 Source: "{#SrcDir}\pi_bench_dev.py";          DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SrcDir}\pi_bench_gui.py";          DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SrcDir}\pi_bench_gui_dev.py";      DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SrcDir}\pi_bench_gui_aero.py";     DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SrcDir}\pi_bench_gui_dev_llm.py";  DestDir: "{app}"; Flags: ignoreversion
 
 ; Maintenance scripts
@@ -78,13 +79,17 @@ Source: "{#SrcDir}\uninstall.py";             DestDir: "{app}"; Flags: ignorever
 Source: "{#SrcDir}\_setup_python.bat";        DestDir: "{app}"; Flags: ignoreversion deleteafterinstall
 
 ; ── Shortcuts ─────────────────────────────────────────────────────────────────
-; pythonw.exe is used (not python.exe) so no console window flashes on launch.
+; PiBench.exe is a pythonw.exe wrapper — no console window on launch.
 [Icons]
-; Start Menu
-Name: "{group}\{#AppName}";           Filename: "{app}\python\PiBench.exe"; Parameters: """{app}\pi_bench_gui_dev_llm.py"""; WorkingDir: "{app}"; Comment: "Pi Bench CPU Benchmark with AI"
-Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}";                                                            Comment: "Uninstall Pi Bench"
-; Desktop (shown only if task is checked)
-Name: "{autodesktop}\{#AppName}";     Filename: "{app}\python\PiBench.exe"; Parameters: """{app}\pi_bench_gui_dev_llm.py"""; WorkingDir: "{app}"; Comment: "Pi Bench CPU Benchmark with AI"; Tasks: desktopicon
+; Start Menu — classic theme
+Name: "{group}\{#AppName}";                Filename: "{app}\python\PiBench.exe"; Parameters: """{app}\pi_bench_gui_dev.py""";      WorkingDir: "{app}"; Comment: "Pi Bench CPU Benchmark"
+; Start Menu — Frutiger Aero theme
+Name: "{group}\{#AppName} Aero";           Filename: "{app}\python\PiBench.exe"; Parameters: """{app}\pi_bench_gui_aero.py""";     WorkingDir: "{app}"; Comment: "Pi Bench CPU Benchmark — Frutiger Aero theme"
+; Start Menu — uninstall
+Name: "{group}\Uninstall {#AppName}";      Filename: "{uninstallexe}";                                                             Comment: "Uninstall Pi Bench"
+; Desktop shortcuts (shown only if task is checked)
+Name: "{autodesktop}\{#AppName}";          Filename: "{app}\python\PiBench.exe"; Parameters: """{app}\pi_bench_gui_dev.py""";      WorkingDir: "{app}"; Comment: "Pi Bench CPU Benchmark"; Tasks: desktopicon
+Name: "{autodesktop}\{#AppName} Aero";     Filename: "{app}\python\PiBench.exe"; Parameters: """{app}\pi_bench_gui_aero.py""";     WorkingDir: "{app}"; Comment: "Pi Bench CPU Benchmark — Frutiger Aero theme"; Tasks: desktopicon
 
 ; ── Post-install steps ────────────────────────────────────────────────────────
 [Run]
@@ -105,7 +110,7 @@ Filename: "{app}\python\python.exe"; \
 
 ; Optional: offer to launch the app at the end of installation
 Filename: "{app}\python\PiBench.exe"; \
-    Parameters: """{app}\pi_bench_gui_dev_llm.py"""; \
+    Parameters: """{app}\pi_bench_gui_dev.py"""; \
     WorkingDir: "{app}"; \
     Description: "Launch {#AppName} now"; \
     Flags: nowait postinstall skipifsilent

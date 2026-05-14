@@ -67,12 +67,12 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # ── Version & auto-update ─────────────────────────────────────────────────────
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 
 # Set to "owner/repo" of the GitHub project that hosts releases.
 # The update checker looks for the latest release asset named *.exe.
 # Leave empty to disable update checks.
-_UPDATE_GITHUB_REPO = "Doc64/pi-bench"
+_UPDATE_GITHUB_REPO = ""
 
 
 def check_for_update() -> "tuple[str, str] | tuple[None, None]":
