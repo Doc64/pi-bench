@@ -9,6 +9,34 @@ Versioning:
 
 ---
 
+## [2.0.1] — 2026-05-14
+
+### Fixed
+- **Update checker never triggered** — `_UPDATE_GITHUB_REPO` was blank `""`;
+  set to `"Doc64/pi-bench"` so the GitHub Releases API is polled correctly.
+- **Keyring D-Bus hang** — `_keyring_get` / `_keyring_set` now run in a
+  daemon thread with a 3-second timeout, preventing indefinite blocks when
+  Secret Service / D-Bus is unavailable in headless SSH sessions on Linux.
+- **setup.sh stale file references** — launcher and desktop entries pointed
+  to removed filenames (`pi_bench_gui_dev_llm.py`, `pi_bench_gui.py`);
+  corrected to `pi_bench_gui_dev.py` and `pi_bench_gui_aero.py`.
+- **install.py launcher names** — `run_llm.bat` / `run_llm.sh` renamed to
+  `run.bat` / `run_aero.bat` and `run.sh` / `run_aero.sh` to match actual
+  output filenames.
+- **setup.sh self-bootstrapping** — running `setup.sh` standalone (without
+  cloning the repo) now downloads all required source files from the GitHub
+  Release assets automatically.
+- **README `--digits` documentation** — clarified that `--digits` is a
+  literal digit count, not a count in millions.
+
+### Changed
+- `release.yml` now injects the real version string into `setup.sh` at
+  build time and uploads Linux source assets (`setup.sh`, `pi_bench.py`,
+  both GUI files, `install.py`, `uninstall.py`) alongside the Windows
+  installer.
+
+---
+
 ## [2.0.0] — 2026-05-14
 
 ### Added

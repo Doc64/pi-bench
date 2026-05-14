@@ -67,7 +67,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # ── Version & auto-update ─────────────────────────────────────────────────────
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.1"
 
 # Set to "owner/repo" of the GitHub project that hosts releases.
 # The update checker looks for the latest release asset named *.exe.
@@ -2198,29 +2198,52 @@ def _keyring_get(username):
     """Look up a stored credential from the OS keyring.
     Returns the password string, or None if not found / keyring unavailable.
     Credentials are encrypted by the OS (DPAPI on Windows, Secret Service on Linux).
+
+    Uses a 3-second timeout so headless / SSH sessions (where the keyring module
+    tries to connect to D-Bus and blocks indefinitely) don't hang the app.
     """
-    try:
-        import keyring as _kr
-        return _kr.get_password(_KEYRING_SERVICE, username)
-    except Exception:
-        return None
+    import threading
+    result = [None]
+
+    def _do():
+        try:
+            import keyring as _kr
+            result[0] = _kr.get_password(_KEYRING_SERVICE, username)
+        except Exception:
+            pass
+
+    t = threading.Thread(target=_do, daemon=True)
+    t.start()
+    t.join(timeout=3.0)
+    return result[0]
 
 
 def _keyring_set(username, password):
     """Save a credential to the OS keyring (encrypted at rest).
     Returns True on success, False if keyring is unavailable or the write failed.
+
+    Uses a 3-second timeout to avoid blocking in headless / SSH sessions.
     """
-    try:
-        import keyring as _kr
-        # Reject plaintext fallback backends — we only accept secure storage.
-        backend = _kr.get_keyring()
-        backend_name = type(backend).__module__ + "." + type(backend).__name__
-        if "plaintext" in backend_name.lower() or "fail" in backend_name.lower():
-            return False
-        _kr.set_password(_KEYRING_SERVICE, username, password)
-        return True
-    except Exception:
-        return False
+    import threading
+    result = [False]
+
+    def _do():
+        try:
+            import keyring as _kr
+            # Reject plaintext fallback backends — we only accept secure storage.
+            backend = _kr.get_keyring()
+            backend_name = type(backend).__module__ + "." + type(backend).__name__
+            if "plaintext" in backend_name.lower() or "fail" in backend_name.lower():
+                return
+            _kr.set_password(_KEYRING_SERVICE, username, password)
+            result[0] = True
+        except Exception:
+            pass
+
+    t = threading.Thread(target=_do, daemon=True)
+    t.start()
+    t.join(timeout=3.0)
+    return result[0]
 
 
 def _sftp_host_from_share(share):
