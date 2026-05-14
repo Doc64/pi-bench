@@ -2032,6 +2032,14 @@ class SettingsPanel(QWidget):
             self._tag_status.setStyleSheet(f"color:{SUBTLE};font-size:8pt;")
 
     def _try_load_keyring(self):
+        if platform.system() == "Linux":
+            # On Linux the login keyring is not unlocked in RDP/headless sessions.
+            # Any query to the keyring daemon — even checking for a missing key —
+            # triggers the GNOME "Authentication required" unlock dialog.
+            # Credentials are loaded in archive_setup only when a NAS upload is
+            # actually requested; auto-loading here is skipped entirely on Linux.
+            self._keyring_pw = None
+            return
         user = self.sftp_user.text().strip() or pb.DEFAULT_SFTP_USER
         try:   pw = pb._keyring_get(user)
         except: pw = None

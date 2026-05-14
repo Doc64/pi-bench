@@ -67,7 +67,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # ── Version & auto-update ─────────────────────────────────────────────────────
-APP_VERSION = "2.2.0"
+APP_VERSION = "2.2.1"
 
 # Set to "owner/repo" of the GitHub project that hosts releases.
 # The update checker looks for the latest release asset named *.exe.
@@ -2376,10 +2376,12 @@ def archive_setup(args):
     if sysname == "Windows":
         user = args.sftp_user
         # Credential priority: --sftp-password CLI → SFTP_PASSWORD env → OS keyring → prompt.
-        # The keyring backend is always encrypted (DPAPI on Windows, Secret Service on Linux).
-        # Plain-text fallback backends are rejected; password never hits disk unencrypted.
+        # Skip the lookup when NAS upload is not requested — avoids triggering
+        # the OS keyring unlock dialog unnecessarily.
         pw_source = "none"
-        if args.sftp_password:
+        if not getattr(args, 'archive', True):
+            password = None
+        elif args.sftp_password:
             password = args.sftp_password
             pw_source = "cli"
         elif os.environ.get("SFTP_PASSWORD"):
@@ -2417,8 +2419,12 @@ def archive_setup(args):
         prefix = "{} {} ".format(cpu, today)
         user = args.smb_user
         # Credential priority: SMB_PASSWORD env → OS keyring → prompt.
+        # Skip the lookup entirely when NAS upload is not requested — avoids
+        # triggering the GNOME keyring unlock dialog on RDP/headless sessions.
         pw_source = "none"
-        if os.environ.get("SMB_PASSWORD"):
+        if not getattr(args, 'archive', True):
+            password = None
+        elif os.environ.get("SMB_PASSWORD"):
             password = os.environ["SMB_PASSWORD"]
             pw_source = "env"
         else:

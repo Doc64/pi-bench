@@ -9,6 +9,22 @@ Versioning:
 
 ---
 
+## [2.2.1] — 2026-05-14
+
+### Fixed
+- **GNOME keyring unlock dialog on RDP/headless Linux** — on RDP sessions
+  the GNOME login keyring is not auto-unlocked.  Any query to the keyring
+  daemon — even checking whether a key exists — causes the daemon to show an
+  "Authentication required" dialog independently of the app.  The Settings
+  panel was querying the keyring on startup and before every run to check for
+  stored NAS credentials.  Both GUI files now skip all keyring access on Linux;
+  NAS credentials are picked up in `archive_setup` only when an upload is
+  actually attempted (and the user has set a password in the Settings field).
+  `archive_setup` was also fixed to skip its own keyring lookup when
+  `args.archive` is False.
+
+---
+
 ## [2.2.0] — 2026-05-14
 
 ### Added
