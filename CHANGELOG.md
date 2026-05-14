@@ -9,21 +9,6 @@ Versioning:
 
 ---
 
-## [1.1.0] — 2026-05-14
-
-### Fixed
-- **Update system deadlock** — clicking "Download & Install" froze the app
-  and the new version never launched. Root causes:
-  1. `/CLOSEAPPLICATIONS` flag told Inno Setup to kill the running app, but
-     the app was blocked waiting for the installer — mutual deadlock.
-  2. `QApplication.quit()` was called from a background thread, which is not
-     thread-safe in Qt and was silently ignored.
-  Fixed by removing `/CLOSEAPPLICATIONS` (the app now closes itself) and
-  scheduling the quit via `QTimer.singleShot(0, QApplication.quit)` so it
-  runs on the main thread.
-
----
-
 ## [1.0.1] — 2026-05-14
 
 ### Added
@@ -33,6 +18,17 @@ Versioning:
   translucent sidebar/tab backgrounds.
 - Both themes are installed side-by-side. Users can choose from the Start
   Menu: **Pi Bench** (classic dark) or **Pi Bench Aero**.
+
+### Fixed
+- **Update system deadlock** — clicking "Download & Install" froze the app
+  and the new version never launched. Two root causes:
+  1. `/CLOSEAPPLICATIONS` flag told Inno Setup to kill the running app, but
+     the app was blocked waiting for the installer — mutual deadlock.
+  2. `QApplication.quit()` was called from a background thread, which is not
+     thread-safe in Qt and was silently ignored.
+  Fixed by removing `/CLOSEAPPLICATIONS` (the app now closes itself) and
+  scheduling the quit via `QTimer.singleShot(0, QApplication.quit)` so it
+  runs safely on the main thread.
 
 ---
 
