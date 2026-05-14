@@ -55,39 +55,75 @@ Designed for three use cases:
 
 ## Installation (End Users)
 
-Download `PiBenchSetup.exe` from the [latest pipeline artifacts](../../-/pipelines) and run it.
+Download `PiBenchSetup-<version>.exe` from the
+[**GitHub Releases page**](https://github.com/Doc64/pi-bench/releases/latest) and run it.
 
 The installer:
 1. Downloads Python 3.12.8 embeddable runtime (~26 MB)
 2. Installs PyQt6, gpt4all, and dependencies (~200 MB)
-3. Creates Start Menu and optional Desktop shortcuts
+3. Creates a single **Pi Bench** Start Menu shortcut and optional Desktop shortcut
 4. Installs to `%LOCALAPPDATA%\Programs\Pi Bench\` — no admin required
 
-The LLM model (~2.2 GB) downloads automatically the first time the AI Analysis tab is opened.
+The LLM model (~2.2 GB) downloads automatically on first launch (shown in the startup splash).
 
-**Requirements:** Windows 10/11 x64. LibreHardwareMonitor must be running with its web server enabled (the app will prompt you on first launch if it isn't).
+**Requirements:** Windows 10/11 x64. LibreHardwareMonitor must be running with its web server enabled
+(the app will prompt you on first launch if it isn't).
+
+### Automatic Updates
+
+Pi Bench checks GitHub Releases 4 seconds after launch. If a newer version is available a banner
+appears at the top of the window — click **Download & Install** and the new installer downloads,
+runs silently, and relaunches the app automatically.
+
+> **Note:** Automatic updates require v2.0.0 or later. If you have an older version installed,
+> download v2.0.0 manually from the releases page once — all future updates will be automatic.
+
+---
+
+## Themes
+
+Both visual styles are included in every install. Switch between them inside the app:
+**Settings tab → Theme → select style → Apply & Restart**.
+
+| Theme | Style |
+|---|---|
+| **Classic (dark)** | Deep navy/midnight blue with high-contrast Catppuccin-style accents |
+| **Frutiger Aero** | Sky-blue gradient, frosted-glass panels, chrome gel buttons — Vista / mid-2000s aesthetic |
+
+The selected theme relaunches the app with the matching script. Both themes have identical features
+including AI analysis.
 
 ---
 
 ## Building the Installer
 
-The GitLab CI/CD pipeline builds `PiBenchSetup.exe` automatically on every push to `main`.
+### Automated (recommended)
 
-To build manually on the workbench:
+Push a version tag — GitHub Actions builds the installer and publishes a GitHub Release automatically:
+
+```
+# 1. Bump APP_VERSION in pi_bench.py
+# 2. Add an entry to CHANGELOG.md
+git add pi_bench.py CHANGELOG.md
+git commit -m "bump version to x.y.z"
+git tag vx.y.z
+git push origin HEAD:main
+git push github master:main
+git push origin vx.y.z
+git push github vx.y.z
+```
+
+The release body is populated automatically from the matching `## [x.y.z]` section in `CHANGELOG.md`.
+
+### Manual (local)
+
+Requires [Inno Setup 7](https://jrsoftware.org/isdl.php) installed.
 
 ```
 build_installer.bat
 ```
 
-Or with Inno Setup directly:
-
-```
-"C:\Users\tom\AppData\Local\Programs\Inno Setup 7\ISCC.exe" pi_bench_setup.iss
-```
-
-Output: `dist\PiBenchSetup.exe`
-
-**Build requirements:** [Inno Setup 7](https://jrsoftware.org/isdl.php) installed on the build machine.
+Output: `dist\PiBenchSetup-<version>.exe`
 
 ---
 
@@ -97,11 +133,11 @@ Output: `dist\PiBenchSetup.exe`
 # Install dependencies
 pip install PyQt6 pyqtgraph mpmath gpt4all
 
-# Dev build (no LLM)
+# Classic dark theme (includes AI analysis + theme switcher)
 python pi_bench_gui_dev.py
 
-# Dev build + AI analysis
-python pi_bench_gui_dev_llm.py
+# Frutiger Aero theme (includes AI analysis + theme switcher)
+python pi_bench_gui_aero.py
 
 # Command line only
 python pi_bench.py --digits 5 --mode both --workers 16
@@ -122,17 +158,20 @@ python pi_bench.py --digits 5 --mode both --workers 16
 ## File Structure
 
 ```
-pi_bench.py              Core benchmark engine, LHM integration, analysis functions
-pi_bench_gui_dev.py      GUI — dev build (no LLM)
-pi_bench_gui_dev_llm.py  GUI — dev build + AI analysis tab
-pi_bench_gui.py          GUI — production build (stable)
-pi_bench_setup.iss       Inno Setup 7 installer script
-_setup_python.bat        Bootstrap: downloads Python runtime during install
-install.py               Post-install: pip installs packages, sets up VC++ runtime
-uninstall.py             Removes runtime artifacts on uninstall
-.gitlab-ci.yml           CI/CD pipeline — builds installer on push to main
-pi_bench_runs/           Saved run JSON files (created at runtime)
-pi_bench_models/         LLM model storage (created at runtime)
+pi_bench.py                   Core benchmark engine, sensor integration, analysis, update checker
+pi_bench_gui_dev.py           GUI — Classic dark theme (AI analysis + theme switcher)
+pi_bench_gui_aero.py          GUI — Frutiger Aero theme (AI analysis + theme switcher)
+pi_bench_gui.py               GUI — minimal production build (stable, no extra tabs)
+pi_bench_setup.iss            Inno Setup 7 installer script
+build_installer.bat           Local build helper (wraps ISCC with version injection)
+_setup_python.bat             Bootstrap: downloads Python runtime during install
+install.py                    Post-install: pip installs packages, sets up VC++ runtime
+uninstall.py                  Removes runtime artifacts on uninstall
+CHANGELOG.md                  Version history
+.github/workflows/release.yml GitHub Actions — builds + publishes release on vX.Y.Z tag
+.gitlab-ci.yml                GitLab CI — builds installer on push to main, release on tag
+pi_bench_runs/                Saved run JSON files (created at runtime)
+pi_bench_models/              LLM model storage (created at runtime)
 ```
 
 ---
@@ -158,11 +197,13 @@ Network activity only happens in these specific, user-visible moments:
 
 | When | What | Where |
 |------|------|--------|
+| Every launch (v2.0.0+) | Checks for newer release tag; no data sent, read-only | `api.github.com/repos/Doc64/pi-bench` |
 | First run (Windows, archive mode) | Downloads LibreHardwareMonitor portable zip | `github.com/LibreHardwareMonitor` |
 | During install | Downloads Python 3.12.8 embeddable runtime | `python.org` |
 | During install | Installs Python packages via pip | `pypi.org` |
 | During install (if needed) | Downloads VC++ 2022 runtime | `aka.ms` (Microsoft) |
-| First AI tab launch | Downloads Phi-3.5 Mini model (~2.2 GB); SHA-256 verified before use | `huggingface.co/bartowski` |
+| First launch | Downloads Phi-3.5 Mini model (~2.2 GB); SHA-256 verified before use | `huggingface.co/bartowski` |
+| "Download & Install" clicked | Downloads the new installer `.exe` | `github.com/Doc64/pi-bench` (release asset) |
 | Archive mode (optional, off by default) | Uploads benchmark report to your NAS | Your NAS (user-configured) |
 
 **Sensor data stays on your machine.** LibreHardwareMonitor's JSON endpoint is bound to `localhost` only — not reachable from other machines on your network.
