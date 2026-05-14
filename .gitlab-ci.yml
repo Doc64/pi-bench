@@ -28,13 +28,24 @@ stages:
   - build
   - release
 
-# ── Shared: extract version from pi_bench.py ─────────────────────────────────
+# ── Shared: extract version + changelog section from pi_bench.py / CHANGELOG.md ──
 .version_script: &version_script
   - |
     $ver = (Select-String '^APP_VERSION\s*=\s*"(.+)"' pi_bench.py).Matches[0].Groups[1].Value
     if (-not $ver) { Write-Error "Could not read APP_VERSION"; exit 1 }
     $env:CI_APP_VERSION = $ver
     Write-Host "Version: $ver"
+
+    # Extract changelog section for this version
+    $changelog = Get-Content CHANGELOG.md -Raw
+    $pattern   = "(?s)## \[$([regex]::Escape($ver))\][^\n]*\n(.+?)(?=\n## \[|\z)"
+    $m         = [regex]::Match($changelog, $pattern)
+    if ($m.Success) {
+      $env:RELEASE_NOTES = $m.Groups[1].Value.Trim()
+    } else {
+      $env:RELEASE_NOTES = "See [CHANGELOG](CHANGELOG.md) for details."
+    }
+    Write-Host "Release notes: $($env:RELEASE_NOTES.Length) chars"
 
 # ── build job — runs on every push to main ───────────────────────────────────
 build:
@@ -79,7 +90,7 @@ release:
       $body = @{
         name        = "Pi Bench $version"
         tag_name    = $tag
-        description = "## Pi Bench $version`n`nSee [CHANGELOG](CHANGELOG.md) for details."
+        description = $env:RELEASE_NOTES
         assets      = @{
           links = @(
             @{
