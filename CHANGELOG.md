@@ -9,6 +9,27 @@ Versioning:
 
 ---
 
+## [2.1.0] — 2026-05-14
+
+### Added
+- **sudo prompt for sensor capture (Linux)** — when the `sudo` credential
+  cache is empty, Pi Bench now shows a dialog explaining that `turbostat`
+  requires a one-time `sudo` authorisation to read CPU temperatures, clocks,
+  and power.  The dialog makes clear that the password is passed directly to
+  `sudo` and never stored or logged by Pi Bench, and that the `sudo` cache
+  expires automatically (5–15 min via `/etc/sudoers`).  A **Skip** button
+  lets users run the benchmark without sensor capture.  If the cache is already
+  warm the dialog never appears.
+
+### Fixed
+- **Benchmark skipped when NAS archive is off (Linux)** — `turbostat` was
+  only started when the "Archive to NAS" checkbox was enabled.  With no NAS
+  password the checkbox silently resolved to off, leaving the live chart
+  empty and no report saved.  Sensor capture and local report saving now run
+  on Linux regardless of the NAS archive setting; NAS upload remains optional.
+
+---
+
 ## [2.0.1] — 2026-05-14
 
 ### Fixed

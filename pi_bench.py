@@ -67,7 +67,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # ── Version & auto-update ─────────────────────────────────────────────────────
-APP_VERSION = "2.0.1"
+APP_VERSION = "2.1.0"
 
 # Set to "owner/repo" of the GitHub project that hosts releases.
 # The update checker looks for the latest release asset named *.exe.
