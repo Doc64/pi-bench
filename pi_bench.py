@@ -210,9 +210,12 @@ def read_fan_max(fan):
         return None
 
 
-def _tail_turbostat_aggregate(path):
-    """Return a short live readout from the latest turbostat aggregate row, or None.
-    Also reports the file's mtime age so we can flag stale buffered data."""
+def _read_turbostat_latest(path):
+    """Parse the most recent aggregate row from a turbostat output file.
+
+    Returns a dict with numeric sensor values and the raw row, or None if the
+    file does not exist or no aggregate row has been written yet.
+    """
     if not path or not os.path.exists(path):
         return None
     try:
@@ -245,27 +248,40 @@ def _tail_turbostat_aggregate(path):
         return None
     headers, parts = last_agg
     row = dict(zip(headers, parts))
-    busy = row.get("Busy%", "?")
-    mhz = row.get("Bzy_MHz", "?")
-    pkg_t = row.get("PkgTmp", "?")
+    def _f(key):
+        try: return float(row.get(key) or 0)
+        except (ValueError, TypeError): return 0.0
+    return {
+        "busy_pct": _f("Busy%"),
+        "mhz":      _f("Bzy_MHz"),
+        "temp_c":   _f("PkgTmp"),
+        "power_w":  _f("PkgWatt"),
+        "age_s":    age,
+        "row":      row,
+    }
+
+
+def _tail_turbostat_aggregate(path):
+    """Return a short live readout from the latest turbostat aggregate row, or None."""
+    d = _read_turbostat_latest(path)
+    if d is None:
+        return None
+    row = d["row"]
+    busy  = row.get("Busy%",   "?")
+    mhz   = row.get("Bzy_MHz", "?")
+    pkg_t = row.get("PkgTmp",  "?")
     pkg_w = row.get("PkgWatt", "?")
     # Heuristic: flag implausibly low package power when CPU is clearly busy.
     # Some CPUs (e.g. consumer Haswell-E i7-58XX/59XX) have broken RAPL energy
     # counters that report sub-watt values regardless of actual load.
-    suspicious = False
-    try:
-        if float(busy) >= 80.0 and float(pkg_w) < 5.0:
-            suspicious = True
-    except (TypeError, ValueError):
-        pass
-
+    suspicious = d["busy_pct"] >= 80.0 and d["power_w"] < 5.0
     if suspicious:
         base = "{:>5}% busy @ {:>4} MHz, {:>3}C, RAPL unreliable on this CPU".format(
             busy, mhz, pkg_t)
     else:
         base = "{:>5}% busy @ {:>4} MHz, {:>3}C, {:>5}W".format(busy, mhz, pkg_t, pkg_w)
-    if age > 4:
-        base += "  (last sample {:.0f}s ago)".format(age)
+    if d["age_s"] > 4:
+        base += "  (last sample {:.0f}s ago)".format(d["age_s"])
     return base
 
 
@@ -324,6 +340,12 @@ class HeartbeatReporter:
                     power_w = sample.get("pkg_watt") or 0.0
                     tail = _format_lhm_live(self.lhm_sampler)
             if tail is None:
+                d = _read_turbostat_latest(self.raw_path)
+                if d is not None:
+                    busy_pct = d["busy_pct"]
+                    mhz      = d["mhz"]
+                    temp_c   = d["temp_c"]
+                    power_w  = d["power_w"]
                 tail = _tail_turbostat_aggregate(self.raw_path)
             if tail:
                 chunks.append(tail)
@@ -1007,11 +1029,11 @@ PI_REF_FRAC_1000 = (
 )
 assert len(PI_REF_FRAC_1000) == 1000
 
-DEFAULT_SMB_SHARE = os.environ.get("SMB_SHARE", "//192.168.200.36/Common-Room")
-DEFAULT_SMB_USER = os.environ.get("SMB_USER", "tom")
-DEFAULT_SMB_SUBDIR = os.environ.get("SMB_SUBDIR", "Scripts/Benchmarks")
-DEFAULT_SFTP_USER = os.environ.get("SFTP_USER", "pi_bench")
-DEFAULT_SFTP_PATH = os.environ.get("SFTP_PATH", "/mnt/Family-Nas/Common-Room/Scripts/Benchmarks")
+DEFAULT_SMB_SHARE  = os.environ.get("SMB_SHARE",  "")
+DEFAULT_SMB_USER   = os.environ.get("SMB_USER",   "")
+DEFAULT_SMB_SUBDIR = os.environ.get("SMB_SUBDIR", "pi_bench_runs")
+DEFAULT_SFTP_USER  = os.environ.get("SFTP_USER",  "")
+DEFAULT_SFTP_PATH  = os.environ.get("SFTP_PATH",  "pi_bench_runs")
 
 # Service name used for all pi_bench credentials stored in the OS keyring.
 # Windows: Windows Credential Locker (DPAPI-encrypted).

@@ -1960,7 +1960,7 @@ class SettingsPanel(QWidget):
         self.archive_chk.setChecked(True); nl.addWidget(self.archive_chk)
         self.archive_chk.stateChanged.connect(self.settings_changed)
         nl.addWidget(QLabel("NAS IP:"))
-        self.nas_ip = QLineEdit("192.168.200.36"); nl.addWidget(self.nas_ip)
+        self.nas_ip = QLineEdit(); self.nas_ip.setPlaceholderText("e.g. 192.168.1.100"); nl.addWidget(self.nas_ip)
         nl.addWidget(QLabel("SFTP user:"))
         self.sftp_user = QLineEdit(pb.DEFAULT_SFTP_USER); nl.addWidget(self.sftp_user)
         nl.addWidget(QLabel("SFTP password:"))
@@ -2073,7 +2073,7 @@ class SettingsPanel(QWidget):
     def reload_keyring(self): self._try_load_keyring()
 
     def get_config(self) -> dict:
-        nas = self.nas_ip.text().strip() or "192.168.200.36"
+        nas = self.nas_ip.text().strip()
         user = self.sftp_user.text().strip() or pb.DEFAULT_SFTP_USER
         pw   = self._pw_field.text().strip() or getattr(self,"_keyring_pw",None)
         if self.archive_chk.isChecked() and pw is None:
