@@ -67,7 +67,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # ── Version & auto-update ─────────────────────────────────────────────────────
-APP_VERSION = "2.2.1"
+APP_VERSION = "2.2.2"
 
 # Set to "owner/repo" of the GitHub project that hosts releases.
 # The update checker looks for the latest release asset named *.exe.
@@ -2675,7 +2675,16 @@ def archive_finalize(args, state, bench_output):
     cpu_subdir = state["cpu_subdir"]
 
     if password is None:
-        print("[archive] saved locally only: {}".format(final_path), flush=True)
+        # No NAS credentials — save the report into pi_bench_runs/ next to pi_bench.py.
+        local_runs = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pi_bench_runs")
+        try:
+            os.makedirs(local_runs, exist_ok=True)
+            local_dest = os.path.join(local_runs, log_filename)
+            import shutil
+            shutil.copy2(final_path, local_dest)
+            print("[archive] saved locally: {}".format(local_dest), flush=True)
+        except Exception as e:
+            print("[archive] local save failed: {} (report still at {})".format(e, final_path), flush=True)
         return
 
     # Step 9: upload to the CPU-specific subfolder

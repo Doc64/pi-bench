@@ -9,6 +9,17 @@ Versioning:
 
 ---
 
+## [2.2.2] — 2026-05-18
+
+### Fixed
+- **Local report save when NAS is not configured** — when no SFTP credentials
+  are available, `archive_finalize` was writing the report to `/tmp/` and
+  returning without copying it anywhere permanent.  Reports are now saved
+  directly into `pi_bench_runs/` (next to `pi_bench.py`) so they appear in
+  the History tab and persist across reboots.
+
+---
+
 ## [2.2.1] — 2026-05-14
 
 ### Fixed
