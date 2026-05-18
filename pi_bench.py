@@ -1586,6 +1586,48 @@ def measure_cooldown(lhm_sampler, target_tmp, progress_callback=None,
     return cooldown_samples
 
 
+def measure_cooldown_turbostat(raw_path, target_tmp, progress_callback=None,
+                                max_duration=90):
+    """Linux equivalent of measure_cooldown() — polls the turbostat raw file
+    instead of an LHMSampler.
+
+    Returns a list of sample dicts using the same keys as LHM samples
+    (pkg_tmp, cpu_busy, pkg_watt) so summarize_cooldown() works unchanged.
+    """
+    cooldown_samples = []
+    t0 = time.time()
+    while True:
+        elapsed = time.time() - t0
+        if elapsed > max_duration:
+            break
+        d = _read_turbostat_latest(raw_path)
+        if d is not None:
+            sample = {
+                "pkg_tmp":  d["temp_c"],
+                "cpu_busy": d["busy_pct"],
+                "pkg_watt": d["power_w"],
+                "core_clocks":      [],
+                "core_temps":       [],
+                "core_clock_names": [],
+                "core_temp_names":  [],
+            }
+            cooldown_samples.append(sample)
+            cur_tmp = d["temp_c"]
+            if cur_tmp <= (target_tmp + 5.0) and elapsed >= 5.0:
+                break
+            if progress_callback is not None:
+                try:
+                    progress_callback(
+                        elapsed, 0, 0,
+                        d["busy_pct"], d["mhz"], cur_tmp, d["power_w"],
+                        [], [], [], [],
+                    )
+                except Exception:
+                    pass
+        time.sleep(1.0)
+    return cooldown_samples
+
+
 def summarize_cooldown(cooldown_samples):
     """Summarise a cool-down sample list returned by measure_cooldown().
 

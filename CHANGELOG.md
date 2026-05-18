@@ -14,9 +14,18 @@ Versioning:
 ### Fixed
 - **Local report save when NAS is not configured** — when no SFTP credentials
   are available, `archive_finalize` was writing the report to `/tmp/` and
-  returning without copying it anywhere permanent.  Reports are now saved
+  returning without copying it anywhere permanently.  Reports are now saved
   directly into `pi_bench_runs/` (next to `pi_bench.py`) so they appear in
   the History tab and persist across reboots.
+- **No sensor data on Linux** — the GUI's report builder only populated
+  thermal/power data from LHM (Windows).  On Linux, turbostat data was parsed
+  inside `archive_finalize` but never fed into the in-app report shown in the
+  Results tab.  The raw turbostat file is now read and parsed in the
+  `BenchmarkThread` so the Full Report (.log) tab shows real sensor summaries.
+- **No cool-down phase on Linux** — cool-down measurement was gated on an LHM
+  sampler being present.  A new `measure_cooldown_turbostat()` function polls
+  the live turbostat file instead, enabling the cool-down phase and chart on
+  Linux.
 
 ---
 

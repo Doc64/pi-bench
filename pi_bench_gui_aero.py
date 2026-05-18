@@ -1105,8 +1105,8 @@ class BenchmarkThread(QThread):
 
             # ── Cool-down phase ──────────────────────────────────────────
             # Measure how fast the CPU returns to idle temps — a direct
-            # indicator of cooler effectiveness.  Runs only when the
-            # benchmark completed without error and LHM is active.
+            # indicator of cooler effectiveness.  Runs on Windows via LHM
+            # and on Linux via the live turbostat raw file.
             _active_sampler = archive_state.get("lhm_sampler") or own_lhm
             if _active_sampler is not None:
                 _bench_end_sample_count = len(_active_sampler.all_samples())
@@ -1116,6 +1116,16 @@ class BenchmarkThread(QThread):
                 self.log_line.emit("[cooldown] measuring cool-down (up to 90 s)…")
                 cooldown_samples = pb.measure_cooldown(
                     _active_sampler, _idle_tmp, on_progress, max_duration=90)
+                self.log_line.emit(
+                    f"[cooldown] done — {len(cooldown_samples)} samples, "
+                    f"dropped {pb.summarize_cooldown(cooldown_samples).get('drop_c', 0):.1f} °C")
+            elif platform.system() == "Linux" and raw_turbo:
+                _d = pb._read_turbostat_latest(raw_turbo)
+                _idle_tmp = (_d["temp_c"] if _d else None) or 35.0
+                self.phase_changed.emit("cooldown")
+                self.log_line.emit("[cooldown] measuring cool-down (up to 90 s)…")
+                cooldown_samples = pb.measure_cooldown_turbostat(
+                    raw_turbo, _idle_tmp, on_progress, max_duration=90)
                 self.log_line.emit(
                     f"[cooldown] done — {len(cooldown_samples)} samples, "
                     f"dropped {pb.summarize_cooldown(cooldown_samples).get('drop_c', 0):.1f} °C")
@@ -1159,7 +1169,24 @@ class BenchmarkThread(QThread):
                     report["cooling_text"] = pb.format_cooling_analysis(cooling)
                     fd = pb.analyze_fans_lhm(bench_samps)
                     report["fan_text"]     = pb.format_fan_analysis(fd) if fd else None
+            elif platform.system() == "Linux" and raw_turbo and os.path.exists(raw_turbo):
+                try:
+                    raw_text = open(raw_turbo).read()
+                    if raw_text:
+                        summary = pb.parse_turbostat(raw_text)
+                        report["summary"]      = summary
+                        report["summary_text"] = pb.format_turbostat_summary(summary)
+                        cooling = pb.analyze_cooling(raw_text)
+                        report["cooling"]      = cooling
+                        report["cooling_text"] = pb.format_cooling_analysis(cooling)
+                        fd = pb.analyze_fans(fan_samples or [], fans or [])
+                        report["fan_text"]     = pb.format_fan_analysis(fd) if fd else None
+                except Exception:
+                    pass
 
+            sensor_source = ("LibreHardwareMonitor" if active
+                             else "turbostat" if platform.system() == "Linux"
+                             else "none")
             try:
                 run_n = datetime.datetime.now().strftime("%m-%d-%Y %H-%M-%S")
                 report["full_report"] = pb.build_combined_report(
@@ -1167,7 +1194,7 @@ class BenchmarkThread(QThread):
                     report["summary_text"],
                     cooling_text=report["cooling_text"],
                     fan_text=report["fan_text"],
-                    sensor_source="LibreHardwareMonitor" if active else "none",
+                    sensor_source=sensor_source,
                     cooldown_stats=report.get("cooldown_stats"),
                     ambient_c=report.get("ambient_c"),
                     run_tag=report.get("run_tag") or None)
